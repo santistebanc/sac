@@ -1,0 +1,68 @@
+{
+  "name": "sac",
+  "version": "1.0.0",
+  "description": "A declarative state library with atoms, computed values, and conditional transitions.",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./core": {
+      "import": {
+        "types": "./dist/core.d.ts",
+        "default": "./dist/core.js"
+      },
+      "require": {
+        "types": "./dist/core.d.cts",
+        "default": "./dist/core.cjs"
+      }
+    },
+    "./calcs": {
+      "import": {
+        "types": "./dist/calcs.d.ts",
+        "default": "./dist/calcs.js"
+      },
+      "require": {
+        "types": "./dist/calcs.d.cts",
+        "default": "./dist/calcs.cjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "node --import tsx/esm --test test/index.test.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "tsup": "^8.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.4.0"
+  },
+  "keywords": [
+    "state",
+    "reactive",
+    "declarative",
+    "atoms",
+    "computed",
+    "state-machine"
+  ],
+  "license": "MIT"
+}
