@@ -808,3 +808,70 @@ test('User example: combined fluent logic with setTo and is', () => {
     assert.equal(get(phase), 'running')
     assert.equal(get(score), 50)
 })
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Architectural: Selective Watchers & Safety
+// ═══════════════════════════════════════════════════════════════════════════════
+
+test('resolve: throws on direct circular dependency', () => {
+    const { get } = run()
+    const a: any = calc(() => get(a), [])
+    assert.throws(() => get(a), /Circular dependency/)
+})
+
+test('resolve: throws on indirect circular dependency', () => {
+    const { get } = run()
+    const a: any = calc(() => get(b), [])
+    const b: any = calc(() => get(a), [])
+    assert.throws(() => get(a), /Circular dependency/)
+})
+
+test('watch: tracks atoms deeply through calc nodes', () => {
+    const a = state(1)
+    const b = state(2)
+    const sumVal = calc((x, y) => x + y, [a, b])
+    const doubled = calc(s => s * 2, [sumVal])
+
+    const { send, watch } = run()
+    let count = 0
+    watch(() => count++, [doubled])
+
+    send(set(a, 10)) // Should trigger
+    assert.equal(count, 1)
+
+    send(set(b, 20)) // Should trigger
+    assert.equal(count, 2)
+})
+
+test('watch: does NOT fire for unrelated atoms (granular index test)', () => {
+    const active = state(true)
+    const score = state(0)
+    const isReady = eq(active, true)
+
+    const { send, watch } = run()
+    let fireCount = 0
+    watch(() => fireCount++, [isReady])
+
+    send(set(score, 100)) // Change UNRELATED atom
+    assert.equal(fireCount, 0) // Should NOT have fired
+
+    send(set(active, false)) // Change RELATED atom
+    assert.equal(fireCount, 1) // Should have fired
+})
+
+test('watch: tracks atoms through iff nodes', () => {
+    const loggedIn = state(false)
+    const role = state('guest')
+
+    const view = iff([loggedIn])(role, 'pls login')
+
+    const { send, watch } = run()
+    let count = 0
+    watch(() => count++, [view])
+
+    send(set(loggedIn, true)) // Logic change: pls login -> guest
+    assert.equal(count, 1)
+
+    send(set(role, 'admin')) // Dependency change in the matched branch
+    assert.equal(count, 2)
+})
