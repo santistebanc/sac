@@ -1,5 +1,16 @@
 // ─── Utility types ──────────────────────────────────────────────────────────
 
+/** Deeply freeze an object to prevent mutation. */
+function deepFreeze<T>(obj: T): T {
+    if (obj == null || typeof obj !== 'object' || Object.isFrozen(obj)) return obj
+    const props = Object.getOwnPropertyNames(obj)
+    for (const name of props) {
+        const value = (obj as any)[name]
+        if (value && typeof value === 'object') deepFreeze(value)
+    }
+    return Object.freeze(obj)
+}
+
 /** Extract the resolved value type from any node or plain value. */
 type ResolveOne<R> =
     R extends Atom<infer T> ? T :
@@ -84,7 +95,7 @@ function findAtoms(node: unknown, visited = new Set<unknown>()): Set<Atom<any>> 
 // ─── Constructors ────────────────────────────────────────────────────────────
 
 export function state<T>(initial: T): Atom<T> {
-    return { _type: 'state', initial }
+    return { _type: 'state', initial: deepFreeze(initial) }
 }
 
 export function calc<D extends readonly unknown[], R>(
@@ -145,7 +156,7 @@ export function run() {
                     if (cached && cached.depValues.every((v, i) => Object.is(v, args[i]))) {
                         return cached.result
                     }
-                    const result = c.fn(...args)
+                    const result = deepFreeze(c.fn(...args))
                     calcCache.set(c, { depValues: args, result })
                     return result
                 }
@@ -192,7 +203,7 @@ export function run() {
         const planned = [...candidates].map(w => ({ w, snap: w.deps.map(d => resolve(d)) }))
 
         // ③ Apply mutations atomically
-        const values = muts.map(m => resolve(m.value))
+        const values = muts.map(m => deepFreeze(resolve(m.value)))
         muts.forEach((m, i) => store.set(m.atom, values[i]))
 
         // ④ Notify candidates whose resolved values actually changed.

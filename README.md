@@ -4,6 +4,14 @@
 
 A tiny, declarative state library for TypeScript. Define atoms, derive computed values, express conditional transitions, and reactively watch changes — all as composable, plain data structures with no magic.
 
+## Key Features
+
+- **Granular Reactivity**: High-performance dependency tracking indexes atoms to minimize work.
+- **Deep Immutability**: Built-in protection prevents direct state corruption via `deepFreeze`.
+- **Circular Safety**: Detects and throws on circular calculation dependencies.
+- **Fluent & Functional**: Choose between snappy fluent atoms (`num`, `bool`, `choice`) or pure data-driven functions.
+- **Zero-Cost Abstraction**: Minimal runtime overhead and tiny bundle size (< 2kb).
+
 ---
 
 ## Contents

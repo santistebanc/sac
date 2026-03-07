@@ -875,3 +875,24 @@ test('watch: tracks atoms through iff nodes', () => {
     send(set(role, 'admin')) // Dependency change in the matched branch
     assert.equal(count, 2)
 })
+
+test('immutability: prevents direct mutation of state objects', () => {
+    const config = state({ volume: 50, nested: { value: 1 } })
+    const { get } = run()
+    const data = get(config)
+
+    // Should be frozen
+    assert.equal(Object.isFrozen(data), true)
+    assert.equal(Object.isFrozen(data.nested), true)
+
+    // In strict mode (which tests run in), this should throw
+    assert.throws(() => {
+        (data as any).volume = 100
+    }, TypeError)
+
+    assert.throws(() => {
+        (data as any).nested.value = 2
+    }, TypeError)
+
+    assert.equal(data.volume, 50)
+})
