@@ -16,10 +16,14 @@ A tiny, declarative state library for TypeScript. Define atoms, derive computed 
 
 ## Contents
 
-- [Core concepts](#core-concepts)
-- [Installation](#installation)
 - [Quick start](#quick-start)
-- [API reference](#api-reference)
+- [Fluent API](#fluent-api)
+  - [num()](#num)
+  - [text()](#text)
+  - [bool()](#bool)
+  - [list()](#list)
+  - [choice()](#choice)
+- [Core API](#core-api)
   - [state()](#state)
   - [calc()](#calc)
   - [set()](#set)
@@ -84,42 +88,81 @@ npm install github:santistebanc/sac
 ## Quick start
  
 ```ts
-import { state, set, calc, iff, run, gt, add, eq } from 'sac'
+import { num, choice, iff, run } from 'sac'
 
-// 1. Define atoms
-const score = state(0)
-const level = state(1)
-const phase = state<'start' | 'playing' | 'end'>('start')
+// 1. Define smart atoms
+const score = num(0)
+const phase = choice('start', 'playing', 'end')
 
-// 2. Derive values
-const isHighScore = gt(score, 100)
-const nextLevel   = set(level, add(level, 1))
+// 2. Define logic using fluent methods
+const isHighScore = score.gt(100)
+const win         = score.add(50) 
 
 // 3. Define transitions
 const advance = iff(
-  [eq(phase, 'start')],
-  [eq(phase, 'playing'), isHighScore],
+  phase.is.start,
+  [phase.is.playing, isHighScore],
 )(
-  [set(phase, 'playing')],
-  [set(phase, 'end'), nextLevel],
+  phase.setTo.playing,
+  [phase.setTo.end, score.set(win)],
 )
 
 // 4. Create a runtime and interact
 const { get, send, watch } = run()
 
-console.log(get(phase))   // 'start'
-send(advance)
-console.log(get(phase))   // 'playing'
-
-watch((s, l) => console.log(`score=${s} level=${l}`), [score, level])
-send(score.set(150))      // logs: score=150 level=1
+send(advance)           // phase: 'start' -> 'playing'
+watch((s) => console.log(`score: ${s}`), [score])
+send(score.set(150))    // logs: score: 150
+send(advance)           // phase: 'playing' -> 'end'
 ```
 
 **Note:** While you can use core functions like `state()` and `set()`, the **Fluent API** (`num`, `choice`, etc.) is the recommended way to get the best DX.
 
 ---
 
-## API reference
+## Fluent API
+
+Smart constructors that pre-bind helpers to atoms for a more ergonomic DX. All return `Atom<T>` nodes enhanced with methods.
+
+### `num(initial)`
+- **Methods:** `.add(v)`, `.sub(v)`, `.mul(v)`, `.div(v)`, `.mod(v)`, `.pow(v)`, `.neg()`, `.abs()`, `.min(v)`, `.max(v)`, `.clamp(lo, hi)`
+- **Comparisons:** `.lt(v)`, `.lte(v)`, `.gt(v)`, `.gte(v)`, `.eq(v)`, `.neq(v)`
+- **Actions:** `.set(v)`, `.inc()`, `.dec()`, `.reset()`, `.default()`
+
+### `text(initial)`
+- **Methods:** `.concat(...args)`, `.includes(search)`
+- **Comparisons:** `.eq(v)`, `.neq(v)`
+- **Actions:** `.set(v)`, `.reset()`, `.default()`
+
+### `bool(initial)`
+- **Methods:** `.not()`, `.and(...args)`, `.or(...args)`
+- **Comparisons:** `.eq(v)`, `.neq(v)`
+- **Actions:** `.set(v)`, `.toggle()`, `.reset()`, `.default()`
+
+### `list(initial)`
+Returns an `Atom<T[]>` with:
+- **Methods:** `.at(index)`, `.length()`, `.includes(item)`
+- **Actions:** `.push(item)`, `.pop()`, `.remove(item)`, `.set(newList)`, `.reset()`, `.default()`
+
+### `choice(...options)`
+Smart enum-like atoms with dedicated namespaces for autocomplete.
+- **`.is.<option>`**: `Calc` node checking equality.
+- **`.isNot.<option>`**: `Calc` node checking inequality.
+- **`.setTo.<option>`**: `Update` node setting the state.
+- **`.set(v)`, `.eq(v)`, `.neq(v)`**: Standard functional variants for dynamic values.
+
+```ts
+const phase = choice('idle', 'loading', 'done')
+
+send(phase.setTo.loading)
+const isActive = phase.is.loading
+```
+
+---
+
+## Core API
+
+Under the hood, everything in `sac` is built on these four primitives. You can use them directly for custom logic or when the fluent API doesn't fit.
 
 ### `state(initial)`
 
@@ -426,46 +469,6 @@ get(fullName) // 'Ada Lovelace'
 
 ---
 
-## Extensions: Fluent API
-
-Smart constructors that pre-bind helpers to atoms for a more ergonomic DX.
-
-### `num(initial)`
-- **Methods:** `.add(v)`, `.sub(v)`, `.mul(v)`, `.div(v)`, `.mod(v)`, `.pow(v)`, `.neg()`, `.abs()`, `.min(v)`, `.max(v)`, `.clamp(lo, hi)`
-- **Comparisons:** `.lt(v)`, `.lte(v)`, `.gt(v)`, `.gte(v)`, `.eq(v)`, `.neq(v)`
-- **Actions:** `.set(v)`, `.inc()`, `.dec()`, `.reset()`, `.default()`
-
-### `text(initial)`
-- **Methods:** `.concat(...args)`, `.includes(search)`
-- **Comparisons:** `.eq(v)`, `.neq(v)`
-- **Actions:** `.set(v)`, `.reset()`, `.default()`
-
-### `bool(initial)`
-- **Methods:** `.not()`, `.and(...args)`, `.or(...args)`
-- **Comparisons:** `.eq(v)`, `.neq(v)`
-- **Actions:** `.set(v)`, `.toggle()`, `.reset()`, `.default()`
-
-### `list(initial)`
-Returns an `Atom<T[]>` with:
-- **Methods:** `.at(index)`, `.length()`, `.includes(item)`
-- **Actions:** `.push(item)`, `.pop()`, `.remove(item)`, `.set(newList)`, `.reset()`, `.default()`
-
-### `choice(...options)`
-Smart enum-like atoms.
-- **`.is.<option>`**: `Calc` node checking equality.
-- **`.isNot.<option>`**: `Calc` node checking inequality.
-- **`.setTo.<option>`**: `Update` node setting the state.
-- **`.set(v)`, `.eq(v)`, `.neq(v)`**: Standard functional variants for dynamic values.
-
-```ts
-const phase = choice('idle', 'loading', 'done')
-
-send(phase.setTo.loading)
-const isActive = phase.is.loading
-```
-
----
-
 ## Patterns & recipes
 
 ### Derived state
@@ -473,13 +476,13 @@ const isActive = phase.is.loading
 Chain helpers to build complex derived values without any intermediate boilerplate:
 
 ```ts
-const price    = state(9.99)
-const quantity = state(3)
-const taxRate  = state(0.2)
+const price    = num(9.99)
+const quantity = num(3)
+const taxRate  = num(0.2)
 
-const subtotal = mul(price, quantity)
-const tax      = mul(subtotal, taxRate)
-const total    = add(subtotal, tax)
+const subtotal = price.mul(quantity)
+const tax      = subtotal.mul(taxRate)
+const total    = subtotal.add(tax)
 
 const { get } = run()
 get(total) // 35.964
@@ -490,27 +493,25 @@ get(total) // 35.964
 Use `iff` to express state machine transitions declaratively:
 
 ```ts
-type Phase = 'idle' | 'loading' | 'success' | 'error'
-
-const phase   = state<Phase>('idle')
-const hasData = state(false)
-const error   = state<string | null>(null)
+const phase   = choice('idle', 'loading', 'success', 'error')
+const hasData = bool(false)
+const error   = text('')
 
 const next = iff(
-  [eq(phase, 'idle')],
-  [eq(phase, 'loading'), hasData],
-  [eq(phase, 'loading'), neq(error, null)],
+  phase.is.idle,
+  [phase.is.loading, hasData],
+  [phase.is.loading, error.neq('')],
 )(
-  [set(phase, 'loading')],
-  [set(phase, 'success')],
-  [set(phase, 'error')],
+  phase.setTo.loading,
+  phase.setTo.success,
+  phase.setTo.error,
 )
 
 const { send, get } = run()
 
-send(next)                        // idle → loading
-send(set(hasData, true))
-send(next)                        // loading → success
+send(next)                 // idle → loading
+send(hasData.set(true))
+send(next)                 // loading → success
 ```
 
 ### Multi-atom atomic updates
@@ -518,11 +519,11 @@ send(next)                        // loading → success
 `send()` resolves all new values **before** writing any of them. Mutations within one send are always consistent with the pre-send state — order doesn't matter.
 
 ```ts
-const x = state(10)
-const y = state(0)
+const x = num(10)
+const y = num(0)
 
 // Both new values are resolved using x=10 (the old value)
-send([set(x, add(x, 5)), set(y, add(x, 3))])
+send([x.set(x.add(5)), y.set(x.add(3))])
 
 get(x) // 15  (10 + 5)
 get(y) // 13  (10 + 3, not 15 + 3)
@@ -533,9 +534,9 @@ get(y) // 13  (10 + 3, not 15 + 3)
 Watch any mix of atoms, `Calc` nodes, and `Iff` selectors. The callback only fires when the **resolved output** actually changes.
 
 ```ts
-const score  = state(0)
-const level  = state(1)
-const rank   = iff([gte(score, 100)], [gte(score, 50)])('gold', 'silver', 'bronze')
+const score = num(0)
+const level = num(1)
+const rank  = iff(score.gte(100), score.gte(50))('gold', 'silver', 'bronze')
 
 const { send, watch } = run()
 
@@ -544,14 +545,8 @@ watch(
   [score, level, rank],
 )
 
-send(set(score, 60))
+send(score.set(60))
 // → Score: 60 | Level: 1 | Rank: silver
-
-send(set(score, 61))
-// → Score: 61 | Level: 1 | Rank: silver  (rank unchanged, but score changed → fires)
-
-send(set(level, 2))
-// → Score: 61 | Level: 2 | Rank: silver
 ```
 
 ### Composing helpers
@@ -559,17 +554,14 @@ send(set(level, 2))
 Because every helper returns a `Calc`, they nest freely:
 
 ```ts
-const a = state(3)
-const b = state(4)
-const c = state(5)
+const a = num(3)
+const b = num(4)
+const c = num(5)
 
 // Pythagorean check: a² + b² === c²
-const isPythagorean = eq(
-  add(pow(a, 2), pow(b, 2)),
-  pow(c, 2),
-)
+const isPythagorean = a.pow(2).add(b.pow(2)).eq(c.pow(2))
 
-// Hypotenuse of (a, b) vs c
+// You can mix functional and fluent styles:
 const hyp = calc(
   (x: number, y: number) => Math.sqrt(x ** 2 + y ** 2),
   [a, b],
@@ -586,8 +578,8 @@ get(hyp_gt_c)      // false (hyp === c here)
 Multiple calls to `run()` produce completely isolated stores over the same node definitions:
 
 ```ts
-const counter = state(0)
-const bump    = set(counter, add(counter, 1))
+const counter = num(0)
+const bump    = counter.inc()
 
 const r1 = run()
 const r2 = run()

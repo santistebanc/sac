@@ -29,7 +29,7 @@ type ResolvedDeps<D extends readonly unknown[]> = {
 
 export interface Atom<T> {
     readonly _type: 'state'
-    readonly initial: T
+    readonly start: T
 }
 
 export interface Calc<T> {
@@ -60,34 +60,38 @@ const atomsCache = new WeakMap<object, Set<Atom<any>>>()
 /** Recursively find all Atoms reachable from any node (State, Calc, or Iff). */
 function findAtoms(node: unknown, visited = new Set<unknown>()): Set<Atom<any>> {
     if (node == null || typeof node !== 'object') return new Set()
+
     const cached = atomsCache.get(node)
     if (cached) return cached
 
     const nodeObj = node as any
-    if (!nodeObj._type) return new Set()
+    const type = nodeObj._type
+    if (!type || visited.has(node)) return new Set()
 
-    if (visited.has(node)) return new Set()
     visited.add(node)
-
     const atoms = new Set<Atom<any>>()
 
-    if (nodeObj._type === 'state') {
-        atoms.add(nodeObj)
-    } else if (nodeObj._type === 'calc') {
-        for (const dep of nodeObj.deps) {
-            for (const a of findAtoms(dep, visited)) atoms.add(a)
-        }
-    } else if (nodeObj._type === 'iff') {
-        for (const group of nodeObj.conditionGroups) {
-            const cs = Array.isArray(group) ? group : [group]
-            for (const c of cs) for (const a of findAtoms(c, visited)) atoms.add(a)
-        }
-        for (const out of nodeObj.outputs) {
-            for (const a of findAtoms(out, visited)) atoms.add(a)
-        }
+    switch (type) {
+        case 'state':
+            atoms.add(nodeObj)
+            break
+        case 'calc':
+            for (const dep of nodeObj.deps) {
+                for (const a of findAtoms(dep, visited)) atoms.add(a)
+            }
+            break
+        case 'iff':
+            for (const group of nodeObj.conditionGroups) {
+                const cs = Array.isArray(group) ? group : [group]
+                for (const c of cs) for (const a of findAtoms(c, visited)) atoms.add(a)
+            }
+            for (const out of nodeObj.outputs) {
+                for (const a of findAtoms(out, visited)) atoms.add(a)
+            }
+            break
     }
 
-    visited.delete(node) // allow other branches to visit (they will hit the cache anyway)
+    visited.delete(node)
     atomsCache.set(nodeObj, atoms)
     return atoms
 }
@@ -95,7 +99,7 @@ function findAtoms(node: unknown, visited = new Set<unknown>()): Set<Atom<any>> 
 // ─── Constructors ────────────────────────────────────────────────────────────
 
 export function state<T>(initial: T): Atom<T> {
-    return { _type: 'state', initial: deepFreeze(initial) }
+    return { _type: 'state', start: deepFreeze(initial) }
 }
 
 export function calc<D extends readonly unknown[], R>(
@@ -143,25 +147,23 @@ export function run() {
         activeStack.add(node)
 
         try {
-            switch ((node as { _type: string })._type) {
+            const n = node as any
+            switch (n._type) {
                 case 'state': {
-                    const s = node as Atom<any>
-                    if (!store.has(s)) store.set(s, s.initial)
-                    return store.get(s)
+                    if (!store.has(n)) store.set(n, n.start)
+                    return store.get(n)
                 }
                 case 'calc': {
-                    const c = node as Calc<any>
-                    const args = c.deps.map(resolve)
-                    const cached = calcCache.get(c)
+                    const args = n.deps.map(resolve)
+                    const cached = calcCache.get(n)
                     if (cached && cached.depValues.every((v, i) => Object.is(v, args[i]))) {
                         return cached.result
                     }
-                    const result = deepFreeze(c.fn(...args))
-                    calcCache.set(c, { depValues: args, result })
+                    const result = deepFreeze(n.fn(...args))
+                    calcCache.set(n, { depValues: args, result })
                     return result
                 }
                 case 'iff': {
-                    const n = node as Iff<unknown>
                     for (let i = 0; i < n.conditionGroups.length; i++) {
                         const group = n.conditionGroups[i]
                         const conditions = Array.isArray(group) ? group : [group]
@@ -189,27 +191,25 @@ export function run() {
         const muts = collectMuts(action)
         if (muts.length === 0) return
 
-        // ① Determine which watchers could potentially be affected.
-        //    Only watchers that depend on at least one atom being changed need checking.
         const candidates = new Set<WatchEntry>()
-        const changedAtoms = new Set<Atom<any>>()
         for (const m of muts) {
-            changedAtoms.add(m.atom)
             const dependants = watchersByAtom.get(m.atom)
             if (dependants) for (const w of dependants) candidates.add(w)
         }
 
-        // ② Snapshot candidate deps BEFORE any write.
-        const planned = [...candidates].map(w => ({ w, snap: w.deps.map(d => resolve(d)) }))
+        // Snapshot candidates before applying mutations
+        const planned = [...candidates].map(w => ({ w, snap: w.deps.map(resolve) }))
 
-        // ③ Apply mutations atomically
+        // Resolve all values first (atomicity)
         const values = muts.map(m => deepFreeze(resolve(m.value)))
+
+        // Apply mutations
         muts.forEach((m, i) => store.set(m.atom, values[i]))
 
-        // ④ Notify candidates whose resolved values actually changed.
+        // Notify if values changed
         for (const { w, snap } of planned) {
             if (!watchers.has(w)) continue
-            const next = w.deps.map(d => resolve(d))
+            const next = w.deps.map(resolve)
             if (next.some((v, j) => !Object.is(v, snap[j]))) w.fn(...next)
         }
     }
@@ -238,9 +238,9 @@ export function run() {
         }
     }
 
-    function get<T>(node: Val<T>): T {
-        return resolve(node) as T
+    return {
+        send,
+        get: <T>(node: Val<T>) => resolve(node) as T,
+        watch,
     }
-
-    return { send, get, watch }
 }

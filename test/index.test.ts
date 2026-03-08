@@ -7,7 +7,7 @@ import {
     sum, min, max,
     not, and, or,
     concat,
-    num, text, bool, choice, list,
+    num, text, bool, choice, list, record, collection,
     type Val, type Action,
 } from '../src/index.js'
 
@@ -669,7 +669,7 @@ test('list() fluent API works', () => {
     send(items.remove('a'))
     assert.deepEqual(get(items), ['b'])
 
-    send(items.default())
+    send(items.initial())
     assert.deepEqual(get(items), ['a', 'b'])
 })
 
@@ -765,7 +765,7 @@ test('choice() setTo/is/isNot work as separate objects', () => {
     assert.equal(get(phase.is.idle), true)
 })
 
-test('num() inc/dec, clamp and default()', () => {
+test('num() inc/dec, clamp and initial()', () => {
     const { get, send } = run()
     const n = num(10)
 
@@ -778,7 +778,7 @@ test('num() inc/dec, clamp and default()', () => {
     assert.equal(get(n.clamp(0, 5)), 5)
 
     send(n.set(100))
-    send(n.default())
+    send(n.initial())
     assert.equal(get(n), 10)
 })
 
@@ -807,6 +807,95 @@ test('User example: combined fluent logic with setTo and is', () => {
     send(next)
     assert.equal(get(phase), 'running')
     assert.equal(get(score), 50)
+})
+
+test('record() fluent API', () => {
+    const { get, send } = run()
+    const user = record({ name: 'Alice', age: 25 })
+
+    assert.equal(get(user.at('name')), 'Alice')
+    assert.deepEqual(get(user), { name: 'Alice', age: 25 })
+
+    send(user.put('name', 'Bob'))
+    assert.equal(get(user.at('name')), 'Bob')
+
+    send(user.patch({ age: 30 }))
+    assert.deepEqual(get(user), { name: 'Bob', age: 30 })
+})
+
+test('collection() fluent API', () => {
+    const { get, send } = run()
+    const tags = collection(['red', 'blue'])
+
+    assert.equal(get(tags.size()), 2)
+    assert.equal(get(tags.has('red')), true)
+
+    send(tags.add('green'))
+    assert.equal(get(tags.size()), 3)
+
+    send(tags.add('red')) // already exists
+    assert.equal(get(tags.size()), 3)
+
+    send(tags.remove('blue'))
+    assert.equal(get(tags.size()), 2)
+    assert.equal(get(tags.has('blue')), false)
+
+    send(tags.clear())
+    assert.equal(get(tags.size()), 0)
+})
+
+test('num() floor, ceil, round', () => {
+    const { get } = run()
+    const n = num(10.5)
+    assert.equal(get(n.floor()), 10)
+    assert.equal(get(n.ceil()), 11)
+    assert.equal(get(n.round()), 11)
+})
+
+test('text() manipulation methods', () => {
+    const { get, send } = run()
+    const msg = text('  Hello World  ')
+
+    assert.equal(get(msg.trim()), 'Hello World')
+    assert.equal(get(msg.toUpper()), '  HELLO WORLD  ')
+    assert.equal(get(msg.toLower()), '  hello world  ')
+    assert.deepEqual(get(text('A B').split(' ')), ['A', 'B'])
+    assert.equal(get(text('ABC').slice(0, 2)), 'AB')
+    assert.equal(get(text('Hello').replace('H', 'J')), 'Jello')
+    assert.equal(get(text('Hello').startsWith('H')), true)
+    assert.equal(get(text('Hello').endsWith('o')), true)
+})
+
+test('list() functional methods', () => {
+    const { get } = run()
+    const items = list([1, 2, 3])
+
+    assert.deepEqual(get(items.map(x => x * 2)), [2, 4, 6])
+    assert.deepEqual(get(items.filter(x => x > 1)), [2, 3])
+    assert.equal(get(items.reduce((a, b) => a + b, 10)), 16)
+    assert.equal(get(items.find(x => x > 2)), 3)
+    assert.equal(get(items.some(x => x === 2)), true)
+    assert.equal(get(items.every(x => x > 0)), true)
+    assert.deepEqual(get(items.intersect([2, 3, 4])), [2, 3])
+})
+
+test('collection() set operations', () => {
+    const { get } = run()
+    const a = collection(['red', 'blue'])
+    const b = ['blue', 'green']
+
+    assert.deepEqual(get(a.intersect(b)), ['blue'])
+    assert.deepEqual(get(a.union(b)), ['red', 'blue', 'green'])
+    assert.deepEqual(get(a.difference(b)), ['red'])
+})
+
+test('record() functional views', () => {
+    const { get } = run()
+    const user = record({ name: 'Alice', age: 25 })
+
+    assert.deepEqual(get(user.keys()), ['name', 'age'])
+    assert.deepEqual(get(user.values()), ['Alice', 25])
+    assert.deepEqual(get(user.entries()), [['name', 'Alice'], ['age', 25]])
 })
 
 // ═══════════════════════════════════════════════════════════════════════════════
