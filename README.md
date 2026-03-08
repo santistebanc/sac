@@ -42,6 +42,10 @@ A tiny, declarative state library for TypeScript. Define atoms, derive computed 
   - [Reactive watchers](#reactive-watchers)
   - [Composing helpers](#composing-helpers)
   - [Multiple independent runtimes](#multiple-independent-runtimes)
+- [Integrations](#integrations)
+  - [React](#react)
+  - [Vue](#vue)
+  - [Svelte](#svelte)
 - [How it works](#how-it-works)
 
 ---
@@ -593,6 +597,74 @@ r2.get(counter) // 1
 ```
 
 This makes it trivial to run isolated test environments, sandboxed UI instances, or server-side per-request stores.
+
+---
+
+## Integrations
+
+`sac` provides official hooks and utilities for popular UI frameworks.
+
+### React
+
+React integration uses `useSyncExternalStore` for optimized, teardown-safe subscriptions.
+
+```tsx
+import { SacProvider, useVal, useSend } from 'sac/react'
+import { num, run } from 'sac'
+
+const score = num(0)
+const runtime = run()
+
+function App() {
+  return (
+    <SacProvider runtime={runtime}>
+      <Counter />
+    </SacProvider>
+  )
+}
+
+function Counter() {
+  const value = useVal(score)
+  const send = useSend()
+
+  return (
+    <button onClick={() => send(score.inc())}>
+      Score is: {value}
+    </button>
+  )
+}
+```
+
+### Vue
+
+Vue integration provides a `useVal` composable that returns a `shallowRef`.
+
+```ts
+import { useVal } from 'sac/vue'
+import { score, runtime } from './store'
+
+export default {
+  setup() {
+    const value = useVal(score, runtime)
+    return { value }
+  }
+}
+```
+
+### Svelte
+
+Svelte integration converts any `sac` node into a standard Svelte store.
+
+```html
+<script>
+  import { toStore } from 'sac/svelte'
+  import { score, runtime } from './store'
+  
+  const scoreStore = toStore(score, runtime)
+</script>
+
+<h1>Score is {$scoreStore}</h1>
+```
 
 ---
 

@@ -41,6 +41,24 @@
         "types": "./dist/calcs.d.cts",
         "default": "./dist/calcs.cjs"
       }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/integrations/react.d.ts",
+        "default": "./dist/integrations/react.js"
+      }
+    },
+    "./vue": {
+      "import": {
+        "types": "./dist/integrations/vue.d.ts",
+        "default": "./dist/integrations/vue.js"
+      }
+    },
+    "./svelte": {
+      "import": {
+        "types": "./dist/integrations/svelte.d.ts",
+        "default": "./dist/integrations/svelte.js"
+      }
     }
   },
   "scripts": {
@@ -52,9 +70,13 @@
   },
   "devDependencies": {
     "@types/node": "^25.3.5",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "svelte": "^5.53.7",
     "tsup": "^8.0.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vue": "^3.5.29"
   },
   "keywords": [
     "state",
