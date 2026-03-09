@@ -2,7 +2,12 @@
 
 **S**tate · **A**ctions · **C**omputations
 
-A small TypeScript state library for apps with real UI logic.
+A small framework-agnostic TypeScript state library for app logic.
+
+Think of it as:
+- lighter than XState
+- more structured than Zustand
+- usable outside React
 
 Use it when you want:
 - simple state primitives
@@ -17,6 +22,19 @@ Use it when you want:
 - **Derived values by default**: build UI state from state instead of syncing it by hand
 - **Useful runtime hooks**: `watch()` for value changes, `on()` for enter/exit effects
 - **Framework-friendly**: React, Vue, and Svelte helpers are included
+
+## Good fit
+
+Use `sac` when:
+- you want explicit state transitions instead of ad hoc setter code
+- you want derived state without manually syncing extra fields
+- you want app logic that can be reused across React, Vue, or Svelte
+- you want something lighter than a full statechart library
+
+Skip it when:
+- you need a large middleware or plugin ecosystem
+- you need full hierarchical or parallel statecharts
+- you want server-cache/data-fetching features built into the state library
 
 ---
 
@@ -47,8 +65,15 @@ Use it when you want:
   - [Multi-atom atomic updates](#multi-atom-atomic-updates)
   - [Reactive watchers](#reactive-watchers)
   - [Lifecycle effects](#lifecycle-effects)
+  - [Debounced search](#debounced-search)
+  - [Autosave form](#autosave-form)
+  - [Polling while loading](#polling-while-loading)
+  - [Auth or session ready](#auth-or-session-ready)
+  - [WebSocket subscription](#websocket-subscription)
+  - [Debugging](#debugging)
   - [Composing helpers](#composing-helpers)
   - [Multiple independent runtimes](#multiple-independent-runtimes)
+- [Examples](#examples)
 - [Integrations](#integrations)
   - [React](#react)
   - [Vue](#vue)
@@ -114,7 +139,7 @@ const { get, send, watch, on } = run()
 
 watch((nextStatus) => {
   console.log('status:', nextStatus)
-}, [status])
+}, status)
 
 on(status.is.saving)(() => {
   const id = setTimeout(() => send(status.setTo.saved), 800)
@@ -138,22 +163,22 @@ Smart constructors that pre-bind helpers to atoms for a more ergonomic DX. All r
 ### `num(initial)`
 - **Read:** `.add(v)`, `.sub(v)`, `.mul(v)`, `.div(v)`, `.mod(v)`, `.pow(v)`, `.neg()`, `.abs()`, `.min(v)`, `.max(v)`, `.clamp(lo, hi)`
 - **Compare:** `.lt(v)`, `.lte(v)`, `.gt(v)`, `.gte(v)`, `.eq(v)`, `.neq(v)`
-- **Write:** `.set(v)`, `.inc()`, `.dec()`, `.reset()`, `.initial()`
+- **Write:** `.set(v)`, `.inc()`, `.dec()`, `.reset()`
 
 ### `text(initial)`
 - **Read:** `.concat(...args)`, `.includes(search)`
 - **Compare:** `.eq(v)`, `.neq(v)`
-- **Write:** `.set(v)`, `.reset()`, `.initial()`
+- **Write:** `.set(v)`, `.reset()`
 
 ### `bool(initial)`
 - **Read:** `.not()`, `.and(...args)`, `.or(...args)`
 - **Compare:** `.eq(v)`, `.neq(v)`
-- **Write:** `.set(v)`, `.toggle()`, `.reset()`, `.initial()`
+- **Write:** `.set(v)`, `.toggle()`, `.reset()`
 
 ### `list(initial)`
 Returns an `Atom<T[]>` with:
 - **Read:** `.at(index)`, `.length()`, `.includes(item)`
-- **Write:** `.push(item)`, `.pop()`, `.remove(item)`, `.set(newList)`, `.reset()`, `.initial()`
+- **Write:** `.push(item)`, `.pop()`, `.remove(item)`, `.set(newList)`, `.reset()`
 
 ### `choice(...options)`
 Smart enum-like atoms with dedicated namespaces for autocomplete.
@@ -307,7 +332,7 @@ const next = iff([eq(phase, 'start')])(
 
 ### `run()`
 
-Creates an isolated runtime. Returns `{ get, send, watch, on }`.
+Creates an isolated runtime. Returns a `Runtime` with `{ get, send, watch, on }`.
 
 ```ts
 const { get, send, watch, on } = run()
@@ -342,22 +367,21 @@ send(conditionalAction)               // `Iff` node — branching resolved inter
 send([actionA, actionB, conditionalC]) // arrays are flattened recursively
 ```
 
-#### `watch(fn, deps)`
+#### `watch(fn, depOrDeps)`
 
 Runs a callback after `send()` when one of the watched values actually changes. Returns an unsubscribe function.
 
 ```ts
-const unsub = watch(
-  (score, level) => console.log(`score=${score} level=${level}`),
-  [score, level],
-)
+const unsub = watch((score) => {
+  console.log(`score=${score}`)
+}, score)
 
 send(set(score, 10)) // callback fires
 unsub()
 send(set(score, 20)) // callback is silent
 ```
 
-You can watch atoms, calcs, and `iff()` nodes. The callback only fires when their resolved output changes.
+You can pass a single dep or an array of deps. `watch()` accepts atoms, calcs, and `iff()` nodes, and only fires when their resolved output changes.
 
 ```ts
 const doubled = mul(score, 2)
@@ -373,6 +397,7 @@ Runs a handler when a condition is entered, and optionally runs cleanup when tha
 - If the condition is already truthy when you register it, the handler runs immediately.
 - While the condition stays truthy, the handler does not rerun.
 - If the handler returns a cleanup function, that cleanup runs once on exit.
+- You can also pass an array of conditions. Arrays are treated as an `AND`.
 
 ```ts
 const timeout = (action, time) => {
@@ -384,17 +409,21 @@ const { get, send, on } = run()
 
 on(light.is.red)(() => timeout(() => send(light.setTo.green), get(time)))
 on(light.is.green)(() => timeout(() => send(light.setTo.red), get(time)))
+
+on([isLoggedIn, hasToken])(() => {
+  console.log('session is fully ready')
+})
 ```
 
 `on()` runs only after a full `send()` commit, so handlers always see the final post-send state.
 
-The return value is an unsubscribe function. You can also chain `.off()` to run code when the condition is exited after being entered:
+The return value is an unsubscribe function. You can also chain `.exit()` to run code when the condition is exited after being entered:
 
 ```ts
 const unon = on(debugMode)(() => {
   console.log('debug mode entered')
   return () => console.log('debug mode exited')
-}).off(() => {
+}).exit(() => {
   console.log('debug mode left')
 })
 
@@ -609,7 +638,7 @@ const lockScroll = () => {
 const { send, on } = run()
 
 const unmodal = on(modal)(lockScroll)
-  .off(() => console.log('modal closed'))
+  .exit(() => console.log('modal closed'))
 ```
 
 Another common pattern is delayed transitions:
@@ -632,6 +661,144 @@ const ungreen = on(light.is.green)(() => timeout(() => send(light.setTo.red), ge
 unred()
 ungreen()
 ```
+
+### Debounced search
+
+Use `watch()` when the behavior should restart every time a value changes.
+
+```ts
+const query = text('')
+const status = choice('idle', 'typing', 'loading')
+const { send, watch, get } = run()
+
+let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+const unwatch = watch((value) => {
+  clearTimeout(timeoutId)
+
+  if (value === '') {
+    send(status.setTo.idle)
+    return
+  }
+
+  send(status.setTo.typing)
+  timeoutId = setTimeout(() => {
+    searchApi(get(query))
+    send(status.setTo.loading)
+  }, 300)
+}, query)
+```
+
+### Autosave form
+
+This is the same pattern as debouncing, but pointed at persistence.
+
+```ts
+const name = text('')
+const email = text('')
+const saveState = choice('idle', 'dirty', 'saving', 'saved')
+const { send, watch, get } = run()
+
+let saveTimer: ReturnType<typeof setTimeout> | undefined
+
+watch(() => {
+  clearTimeout(saveTimer)
+  send(saveState.setTo.dirty)
+
+  saveTimer = setTimeout(async () => {
+    send(saveState.setTo.saving)
+    await saveProfile({
+      name: get(name),
+      email: get(email),
+    })
+    send(saveState.setTo.saved)
+  }, 800)
+}, [name, email])
+```
+
+### Polling while loading
+
+Use `on()` when work should start on enter and stop on exit.
+
+```ts
+const status = choice('idle', 'loading', 'done', 'error')
+const { send, on } = run()
+
+on(status.is.loading)(() => {
+  const id = setInterval(() => {
+    send(refreshStatus())
+  }, 1000)
+
+  return () => clearInterval(id)
+})
+```
+
+### Auth or session ready
+
+`on()` accepts an array, which works like an `AND` group.
+
+```ts
+const isLoggedIn = bool(false)
+const hasToken = bool(false)
+const { on } = run()
+
+on([isLoggedIn, hasToken])(() => {
+  bootProtectedArea()
+}).exit(() => {
+  teardownProtectedArea()
+})
+```
+
+### WebSocket subscription
+
+When a subscription is keyed by a value like `roomId`, `watch()` is often the right tool because it reruns when the key changes.
+
+```ts
+const roomId = text('')
+const messages = list<string>([])
+const { send, watch } = run()
+
+let cleanup = () => {}
+
+const unwatch = watch((room) => {
+  cleanup()
+
+  if (room === '') return
+
+  const socket = new WebSocket(`/rooms/${room}`)
+  socket.onmessage = (event) => {
+    send(messages.push(event.data))
+  }
+
+  cleanup = () => socket.close()
+}, roomId)
+```
+
+### Debugging
+
+Use `trace()` when you want to log values, and `traceSend()` when you want to log actions.
+
+```ts
+import { run, num, trace, traceSend } from 'sac'
+
+const score = num(0)
+const runtime = run()
+const send = traceSend(runtime, { label: 'actions' })
+
+const untrace = trace(runtime, [score, score.add(1)], {
+  label: 'score',
+})
+
+send(score.set(5))
+// logs: [sac:actions] { ...action }
+// logs: [sac:score] 5 6
+
+untrace()
+```
+
+Both helpers are small wrappers over the existing runtime API, so they are easy to remove once you are done debugging.
+
+For now, that is the debugging story: plain runtime hooks with tiny helpers. If the library grows, those same hooks could support a browser panel or devtools integration later.
 
 ### Composing helpers
 
@@ -677,6 +844,13 @@ r2.get(counter) // 1
 ```
 
 Useful for tests, previews, or per-request server state.
+
+---
+
+## Examples
+
+- React example: [`examples/react-profile-save/README.md`](examples/react-profile-save/README.md)
+- Vanilla example: [`examples/vanilla-traffic-light/README.md`](examples/vanilla-traffic-light/README.md)
 
 ---
 

@@ -7,6 +7,7 @@ import {
     sum, min, max,
     not, and, or,
     concat,
+    trace, traceSend,
     num, text, bool, choice, list, record, collection,
     type Val, type Action,
 } from '../src/index.js'
@@ -440,7 +441,7 @@ test('watch() returns an unsubscribe function', () => {
     const level = state(1)
     const { send, watch } = run()
     const log: number[] = []
-    const unsub = watch((lvl: number) => log.push(lvl), [level])
+    const unsub = watch((lvl: number) => log.push(lvl), level)
     send(set(level, 2))
     unsub()
     send(set(level, 3))
@@ -669,7 +670,7 @@ test('list() fluent API works', () => {
     send(items.remove('a'))
     assert.deepEqual(get(items), ['b'])
 
-    send(items.initial())
+    send(items.reset())
     assert.deepEqual(get(items), ['a', 'b'])
 })
 
@@ -765,7 +766,7 @@ test('choice() setTo/is/isNot work as separate objects', () => {
     assert.equal(get(phase.is.idle), true)
 })
 
-test('num() inc/dec, clamp and initial()', () => {
+test('num() inc/dec, clamp and reset()', () => {
     const { get, send } = run()
     const n = num(10)
 
@@ -778,7 +779,7 @@ test('num() inc/dec, clamp and initial()', () => {
     assert.equal(get(n.clamp(0, 5)), 5)
 
     send(n.set(100))
-    send(n.initial())
+    send(n.reset())
     assert.equal(get(n), 10)
 })
 
@@ -1041,6 +1042,76 @@ test('on() handlers run after atomic send updates are committed', () => {
     assert.deepEqual(seen, [13])
 })
 
+test('on() supports arrays of conditions as an AND group', () => {
+    const active = bool(false)
+    const ready = bool(false)
+    const { send, on } = run()
+    let runs = 0
+
+    on([active, ready])(() => {
+        runs++
+    })
+
+    send(active.set(true))
+    assert.equal(runs, 0)
+
+    send(ready.set(true))
+    assert.equal(runs, 1)
+
+    send(active.set(false))
+    send(active.set(true))
+    assert.equal(runs, 2)
+})
+
+test('on() array conditions clean up when one member exits', () => {
+    const active = bool(false)
+    const ready = bool(false)
+    const { send, on } = run()
+    let cleans = 0
+    let exits = 0
+
+    on([active, ready])(() => {
+        return () => {
+            cleans++
+        }
+    }).exit(() => {
+        exits++
+    })
+
+    send([active.set(true), ready.set(true)])
+    send(active.set(false))
+
+    assert.equal(cleans, 1)
+    assert.equal(exits, 1)
+})
+
+test('watch() accepts a single dep without an array', () => {
+    const active = bool(false)
+    const { send, watch } = run()
+    const seen: boolean[] = []
+
+    watch((value: boolean) => {
+        seen.push(value)
+    }, active)
+
+    send(active.set(true))
+    assert.deepEqual(seen, [true])
+})
+
+test('watch() accepts a single calc dep without an array', () => {
+    const score = num(1)
+    const doubled = score.mul(2)
+    const { send, watch } = run()
+    const seen: number[] = []
+
+    watch((value: number) => {
+        seen.push(value)
+    }, doubled)
+
+    send(score.set(3))
+    assert.deepEqual(seen, [6])
+})
+
 test('on() returns an unsubscribe function', () => {
     const active = bool(true)
     const { send, on } = run()
@@ -1063,12 +1134,12 @@ test('on() returns an unsubscribe function', () => {
     assert.equal(runs, 1)
 })
 
-test('on().off() runs when the condition exits after entry', () => {
+test('on().exit() runs when the condition exits after entry', () => {
     const active = bool(false)
     const { send, on } = run()
     let exits = 0
 
-    on(active)(() => undefined).off(() => {
+    on(active)(() => undefined).exit(() => {
         exits++
     })
 
@@ -1079,12 +1150,12 @@ test('on().off() runs when the condition exits after entry', () => {
     assert.equal(exits, 1)
 })
 
-test('on().off() does not run during manual unsubscribe', () => {
+test('on().exit() does not run during manual unsubscribe', () => {
     const active = bool(true)
     const { on } = run()
     let exits = 0
 
-    const unon = on(active)(() => undefined).off(() => {
+    const unon = on(active)(() => undefined).exit(() => {
         exits++
     })
 
@@ -1113,4 +1184,57 @@ test('on() registrations are independently removable', () => {
 
     assert.equal(cleans, 1)
     assert.equal(debugRuns, 1)
+})
+
+test('on() handles nested sends triggered during enter reconciliation', () => {
+    const active = bool(false)
+    const ready = bool(false)
+    const { send, on } = run()
+    let readyRuns = 0
+
+    on(active)(() => {
+        send(ready.set(true))
+    })
+
+    on(ready)(() => {
+        readyRuns++
+    })
+
+    send(active.set(true))
+
+    assert.equal(readyRuns, 1)
+})
+
+test('trace() logs watched values and returns an unsubscribe function', () => {
+    const score = num(0)
+    const logs: unknown[][] = []
+    const runtime = run()
+
+    const untrace = trace(runtime, [score, score.add(1)], {
+        label: 'score',
+        logger: (...args) => logs.push(args),
+    })
+
+    runtime.send(score.set(2))
+    untrace()
+    runtime.send(score.set(3))
+
+    assert.deepEqual(logs, [['[sac:score]', 2, 3]])
+})
+
+test('traceSend() logs actions before sending them', () => {
+    const score = num(0)
+    const logs: unknown[][] = []
+    const runtime = run()
+    const send = traceSend(runtime, {
+        label: 'actions',
+        logger: (...args) => logs.push(args),
+    })
+
+    send(score.set(4))
+
+    assert.equal(runtime.get(score), 4)
+    assert.equal(logs.length, 1)
+    assert.equal(logs[0][0], '[sac:actions]')
+    assert.deepEqual(logs[0][1], score.set(4))
 })

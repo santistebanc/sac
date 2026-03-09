@@ -11,7 +11,6 @@ function wrap<T, E>(initial: T, ext: (s: Atom<T>) => E) {
     const base = {
         set: (v: Val<T>) => set(s, v),
         reset: () => set(s, s.start),
-        initial: () => set(s, s.start),
         eq: (v: Val<T>) => c.eq(s, v as any),
         neq: (v: Val<T>) => c.neq(s, v as any),
     }

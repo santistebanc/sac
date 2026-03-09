@@ -1,8 +1,8 @@
 import { createContext, useContext, useMemo, useSyncExternalStore, createElement, type ReactNode } from 'react'
 import { run } from '../core.js'
-import type { Val, Action } from '../core.js'
+import type { Val, Runtime } from '../core.js'
 
-type SacRuntime = ReturnType<typeof run>
+type SacRuntime = Runtime
 const SacContext = createContext<SacRuntime | null>(null)
 
 /**
@@ -29,7 +29,7 @@ export function useSac() {
 export function useVal<T>(node: Val<T>): T {
     const { get, watch } = useSac()
     return useSyncExternalStore(
-        (callback) => watch(callback, [node]),
+        (callback) => watch(callback, node),
         () => get(node)
     )
 }

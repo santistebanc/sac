@@ -1,7 +1,7 @@
 {
   "name": "sac",
   "version": "1.0.0",
-  "description": "A declarative state library with atoms, computed values, and conditional transitions.",
+  "description": "A small framework-agnostic TypeScript state library with explicit transitions, derived values, and runtime effects.",
   "type": "module",
   "sideEffects": false,
   "files": [
@@ -84,7 +84,9 @@
     "declarative",
     "atoms",
     "computed",
-    "state-machine"
+    "state-machine",
+    "workflow",
+    "ui-state"
   ],
   "license": "MIT"
 }

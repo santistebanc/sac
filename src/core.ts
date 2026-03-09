@@ -131,24 +131,40 @@ type WatchEntry = {
     atoms: Set<Atom<any>>
 }
 
-type OnHandler = () => void | (() => void)
-type OffHandler = () => void
+export type WatchUnsubscribe = () => void
+export type OnHandler = () => void | (() => void)
+export type ExitHandler = () => void
+export type OnCondition = Val<boolean> | readonly Val<boolean>[]
 
 export interface OnRegistration {
     (): void
-    off(handler: OffHandler): OnRegistration
+    exit(handler: ExitHandler): OnRegistration
+}
+
+export interface Runtime {
+    send(action: Action): void
+    get<T>(node: Val<T>): T
+    watch<T>(
+        fn: (value: ResolveOne<T>) => void,
+        dep: T,
+    ): WatchUnsubscribe
+    watch<D extends readonly unknown[]>(
+        fn: (...args: ResolvedDeps<D>) => void,
+        deps: readonly [...D],
+    ): WatchUnsubscribe
+    on(condition: OnCondition): (handler: OnHandler) => OnRegistration
 }
 
 type OnEntry = {
-    condition: unknown
+    condition: OnCondition
     handler: OnHandler
     active: boolean
     cleanup?: () => void
     disposed: boolean
-    exitHandlers: Set<OffHandler>
+    exitHandlers: Set<ExitHandler>
 }
 
-export function run() {
+export function run(): Runtime {
     const store = new Map<Atom<any>, any>()
     const watchers = new Set<WatchEntry>()
     const watchersByAtom = new Map<Atom<any>, Set<WatchEntry>>()
@@ -207,6 +223,11 @@ export function run() {
         return []
     }
 
+    function resolveOnCondition(condition: OnCondition): boolean {
+        if (Array.isArray(condition)) return condition.every(item => !!resolve(item))
+        return !!resolve(condition)
+    }
+
     function deactivateOn(entry: OnEntry, notifyExitHandlers: boolean): void {
         if (!entry.active) return
         entry.active = false
@@ -239,7 +260,7 @@ export function run() {
                 for (const entry of [...onEntries]) {
                     if (entry.disposed || !onEntries.has(entry)) continue
 
-                    const shouldBeActive = !!resolve(entry.condition)
+                    const shouldBeActive = resolveOnCondition(entry.condition)
                     if (shouldBeActive === entry.active) continue
 
                     if (shouldBeActive) {
@@ -293,16 +314,25 @@ export function run() {
         reconcileOns()
     }
 
+    function watch<T>(
+        fn: (value: ResolveOne<T>) => void,
+        dep: T,
+    ): WatchUnsubscribe
     function watch<D extends readonly unknown[]>(
         fn: (...args: ResolvedDeps<D>) => void,
         deps: readonly [...D],
-    ): () => void {
+    ): WatchUnsubscribe
+    function watch(
+        fn: (...args: any[]) => void,
+        depOrDeps: unknown,
+    ): WatchUnsubscribe {
+        const deps = Array.isArray(depOrDeps) ? depOrDeps : [depOrDeps]
         const entryAtoms = new Set<Atom<any>>()
         for (const d of deps) {
             for (const a of findAtoms(d)) entryAtoms.add(a)
         }
 
-        const entry: WatchEntry = { fn: fn as (...args: any[]) => void, deps, atoms: entryAtoms }
+        const entry: WatchEntry = { fn, deps, atoms: entryAtoms }
         watchers.add(entry)
 
         for (const a of entryAtoms) {
@@ -317,7 +347,7 @@ export function run() {
         }
     }
 
-    function on(condition: unknown) {
+    function on(condition: OnCondition) {
         return (handler: OnHandler): OnRegistration => {
             const entry: OnEntry = {
                 condition,
@@ -334,7 +364,7 @@ export function run() {
                 disposeOn(entry)
             }) as OnRegistration
 
-            registration.off = (exitHandler: OffHandler) => {
+            registration.exit = (exitHandler: ExitHandler) => {
                 entry.exitHandlers.add(exitHandler)
                 return registration
             }
