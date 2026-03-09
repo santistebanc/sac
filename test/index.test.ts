@@ -985,3 +985,132 @@ test('immutability: prevents direct mutation of state objects', () => {
 
     assert.equal(data.volume, 50)
 })
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Runtime on()
+// ═══════════════════════════════════════════════════════════════════════════════
+
+test('on() activates immediately when condition is already true', () => {
+    const light = choice('red', 'green')
+    const { on } = run()
+    let runs = 0
+
+    on(light.is.red)(() => {
+        runs++
+    })
+
+    assert.equal(runs, 1)
+})
+
+test('on() runs once on enter and cleans up once on exit', () => {
+    const active = bool(false)
+    const score = num(0)
+    const { send, on } = run()
+    let runs = 0
+    let cleans = 0
+
+    on(active)(() => {
+        runs++
+        return () => {
+            cleans++
+        }
+    })
+
+    send(active.set(true))
+    send(score.set(1))
+    send(score.set(2))
+    send(active.set(false))
+
+    assert.equal(runs, 1)
+    assert.equal(cleans, 1)
+})
+
+test('on() handlers run after atomic send updates are committed', () => {
+    const armed = bool(false)
+    const x = num(10)
+    const y = num(0)
+    const seen: number[] = []
+    const { get, send, on } = run()
+
+    on(armed)(() => {
+        seen.push(get(y))
+    })
+
+    send([armed.set(true), y.set(x.add(3))])
+
+    assert.deepEqual(seen, [13])
+})
+
+test('on() returns an unsubscribe function', () => {
+    const active = bool(true)
+    const { send, on } = run()
+    let runs = 0
+    let cleans = 0
+
+    const unon = on(active)(() => {
+        runs++
+        return () => {
+            cleans++
+        }
+    })
+
+    assert.equal(runs, 1)
+    unon()
+    assert.equal(cleans, 1)
+
+    send(active.set(false))
+    send(active.set(true))
+    assert.equal(runs, 1)
+})
+
+test('on().off() runs when the condition exits after entry', () => {
+    const active = bool(false)
+    const { send, on } = run()
+    let exits = 0
+
+    on(active)(() => undefined).off(() => {
+        exits++
+    })
+
+    send(active.set(true))
+    send(active.set(false))
+    send(active.set(false))
+
+    assert.equal(exits, 1)
+})
+
+test('on().off() does not run during manual unsubscribe', () => {
+    const active = bool(true)
+    const { on } = run()
+    let exits = 0
+
+    const unon = on(active)(() => undefined).off(() => {
+        exits++
+    })
+
+    unon()
+
+    assert.equal(exits, 0)
+})
+
+test('on() registrations are independently removable', () => {
+    const active = bool(true)
+    const debug = bool(false)
+    const { send, on } = run()
+    let cleans = 0
+    let debugRuns = 0
+
+    const stopActive = on(active)(() => () => {
+        cleans++
+    })
+
+    on(debug)(() => {
+        debugRuns++
+    })
+
+    stopActive()
+    send(debug.set(true))
+
+    assert.equal(cleans, 1)
+    assert.equal(debugRuns, 1)
+})

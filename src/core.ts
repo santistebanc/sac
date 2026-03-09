@@ -131,12 +131,32 @@ type WatchEntry = {
     atoms: Set<Atom<any>>
 }
 
+type OnHandler = () => void | (() => void)
+type OffHandler = () => void
+
+export interface OnRegistration {
+    (): void
+    off(handler: OffHandler): OnRegistration
+}
+
+type OnEntry = {
+    condition: unknown
+    handler: OnHandler
+    active: boolean
+    cleanup?: () => void
+    disposed: boolean
+    exitHandlers: Set<OffHandler>
+}
+
 export function run() {
     const store = new Map<Atom<any>, any>()
     const watchers = new Set<WatchEntry>()
     const watchersByAtom = new Map<Atom<any>, Set<WatchEntry>>()
     const calcCache = new WeakMap<Calc<any>, { depValues: unknown[]; result: any }>()
     const activeStack = new Set<unknown>()
+    const onEntries = new Set<OnEntry>()
+    let reconcilingOns = false
+    let pendingOnReconcile = false
 
     function resolve(node: unknown): unknown {
         if (node == null || typeof node !== 'object' || !('_type' in node)) return node
@@ -187,6 +207,63 @@ export function run() {
         return []
     }
 
+    function deactivateOn(entry: OnEntry, notifyExitHandlers: boolean): void {
+        if (!entry.active) return
+        entry.active = false
+        const cleanup = entry.cleanup
+        entry.cleanup = undefined
+        cleanup?.()
+        if (notifyExitHandlers) {
+            for (const exitHandler of entry.exitHandlers) exitHandler()
+        }
+    }
+
+    function disposeOn(entry: OnEntry): void {
+        if (entry.disposed) return
+        entry.disposed = true
+        onEntries.delete(entry)
+        deactivateOn(entry, false)
+    }
+
+    function reconcileOns(): void {
+        if (reconcilingOns) {
+            pendingOnReconcile = true
+            return
+        }
+
+        reconcilingOns = true
+        try {
+            do {
+                pendingOnReconcile = false
+
+                for (const entry of [...onEntries]) {
+                    if (entry.disposed || !onEntries.has(entry)) continue
+
+                    const shouldBeActive = !!resolve(entry.condition)
+                    if (shouldBeActive === entry.active) continue
+
+                    if (shouldBeActive) {
+                        entry.active = true
+                        entry.cleanup = undefined
+
+                        try {
+                            const cleanup = entry.handler()
+                            if (typeof cleanup === 'function') entry.cleanup = cleanup
+                        } catch (error) {
+                            entry.active = false
+                            entry.cleanup = undefined
+                            throw error
+                        }
+                    } else {
+                        deactivateOn(entry, true)
+                    }
+                }
+            } while (pendingOnReconcile)
+        } finally {
+            reconcilingOns = false
+        }
+    }
+
     function send(action: Action): void {
         const muts = collectMuts(action)
         if (muts.length === 0) return
@@ -212,6 +289,8 @@ export function run() {
             const next = w.deps.map(resolve)
             if (next.some((v, j) => !Object.is(v, snap[j]))) w.fn(...next)
         }
+
+        reconcileOns()
     }
 
     function watch<D extends readonly unknown[]>(
@@ -238,9 +317,36 @@ export function run() {
         }
     }
 
+    function on(condition: unknown) {
+        return (handler: OnHandler): OnRegistration => {
+            const entry: OnEntry = {
+                condition,
+                handler,
+                active: false,
+                disposed: false,
+                exitHandlers: new Set(),
+            }
+
+            onEntries.add(entry)
+            reconcileOns()
+
+            const registration = (() => {
+                disposeOn(entry)
+            }) as OnRegistration
+
+            registration.off = (exitHandler: OffHandler) => {
+                entry.exitHandlers.add(exitHandler)
+                return registration
+            }
+
+            return registration
+        }
+    }
+
     return {
         send,
         get: <T>(node: Val<T>) => resolve(node) as T,
         watch,
+        on,
     }
 }

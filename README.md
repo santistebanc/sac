@@ -2,15 +2,21 @@
 
 **S**tate · **A**ctions · **C**omputations
 
-A tiny, declarative state library for TypeScript. Define atoms, derive computed values, express conditional transitions, and reactively watch changes — all as composable, plain data structures with no magic.
+A small TypeScript state library for apps with real UI logic.
 
-## Key Features
+Use it when you want:
+- simple state primitives
+- derived values without boilerplate
+- conditional transitions as data
+- runtime watchers and enter/exit effects
 
-- **Granular Reactivity**: High-performance dependency tracking indexes atoms to minimize work.
-- **Deep Immutability**: Built-in protection prevents direct state corruption via `deepFreeze`.
-- **Circular Safety**: Detects and throws on circular calculation dependencies.
-- **Fluent & Functional**: Choose between snappy fluent atoms (`num`, `bool`, `choice`) or pure data-driven functions.
-- **Zero-Cost Abstraction**: Minimal runtime overhead and tiny bundle size (< 2kb).
+## Why `sac`
+
+- **Small API**: most apps only need `num`, `text`, `bool`, `choice`, `run`, `send`, `watch`, and `on`
+- **Predictable updates**: one `send()` is one atomic state change
+- **Derived values by default**: build UI state from state instead of syncing it by hand
+- **Useful runtime hooks**: `watch()` for value changes, `on()` for enter/exit effects
+- **Framework-friendly**: React, Vue, and Svelte helpers are included
 
 ---
 
@@ -40,6 +46,7 @@ A tiny, declarative state library for TypeScript. Define atoms, derive computed 
   - [Conditional transitions](#conditional-transitions)
   - [Multi-atom atomic updates](#multi-atom-atomic-updates)
   - [Reactive watchers](#reactive-watchers)
+  - [Lifecycle effects](#lifecycle-effects)
   - [Composing helpers](#composing-helpers)
   - [Multiple independent runtimes](#multiple-independent-runtimes)
 - [Integrations](#integrations)
@@ -50,9 +57,9 @@ A tiny, declarative state library for TypeScript. Define atoms, derive computed 
 
 ---
 
-## Core concepts
+## Mental model
 
-sac has four building blocks:
+Most of `sac` is built from four plain objects:
 
 | Concept | Type | What it is |
 |---|---|---|
@@ -61,7 +68,7 @@ sac has four building blocks:
 | **`iff()`** | `Iff<T>` | A conditional — resolves to an output based on boolean guards |
 | **`set()`** | `Update<T>` | An update — pairs an atom with a new value |
 
-All four are **plain objects**. There is no subscription wiring at definition time. You compose them freely, pass them around as data, and only resolve them when you call `run()`.
+They do nothing on their own. You compose them first, then a runtime created with `run()` evaluates them.
 
 ---
 
@@ -92,35 +99,35 @@ npm install github:santistebanc/sac
 ## Quick start
  
 ```ts
-import { num, choice, iff, run } from 'sac'
+import { text, choice, iff, run } from 'sac'
 
-// 1. Define smart atoms
-const score = num(0)
-const phase = choice('start', 'playing', 'end')
+const name = text('')
+const status = choice('idle', 'saving', 'saved', 'error')
 
-// 2. Define logic using fluent methods
-const isHighScore = score.gt(100)
-const win         = score.add(50) 
+const canSave = name.neq('')
 
-// 3. Define transitions
-const advance = iff(
-  phase.is.start,
-  [phase.is.playing, isHighScore],
-)(
-  phase.setTo.playing,
-  [phase.setTo.end, score.set(win)],
+const saveProfile = iff([canSave, status.isNot.saving])(
+  status.setTo.saving,
 )
 
-// 4. Create a runtime and interact
-const { get, send, watch } = run()
+const { get, send, watch, on } = run()
 
-send(advance)           // phase: 'start' -> 'playing'
-watch((s) => console.log(`score: ${s}`), [score])
-send(score.set(150))    // logs: score: 150
-send(advance)           // phase: 'playing' -> 'end'
+watch((nextStatus) => {
+  console.log('status:', nextStatus)
+}, [status])
+
+on(status.is.saving)(() => {
+  const id = setTimeout(() => send(status.setTo.saved), 800)
+  return () => clearTimeout(id)
+})
+
+send(name.set('Ada'))
+send(saveProfile)
+
+get(status) // 'saving' -> later 'saved'
 ```
 
-**Note:** While you can use core functions like `state()` and `set()`, the **Fluent API** (`num`, `choice`, etc.) is the recommended way to get the best DX.
+If you prefer the lower-level API, you can use `state()`, `calc()`, and `set()` directly. For most app code, the fluent API is easier to read.
 
 ---
 
@@ -129,24 +136,24 @@ send(advance)           // phase: 'playing' -> 'end'
 Smart constructors that pre-bind helpers to atoms for a more ergonomic DX. All return `Atom<T>` nodes enhanced with methods.
 
 ### `num(initial)`
-- **Methods:** `.add(v)`, `.sub(v)`, `.mul(v)`, `.div(v)`, `.mod(v)`, `.pow(v)`, `.neg()`, `.abs()`, `.min(v)`, `.max(v)`, `.clamp(lo, hi)`
-- **Comparisons:** `.lt(v)`, `.lte(v)`, `.gt(v)`, `.gte(v)`, `.eq(v)`, `.neq(v)`
-- **Actions:** `.set(v)`, `.inc()`, `.dec()`, `.reset()`, `.default()`
+- **Read:** `.add(v)`, `.sub(v)`, `.mul(v)`, `.div(v)`, `.mod(v)`, `.pow(v)`, `.neg()`, `.abs()`, `.min(v)`, `.max(v)`, `.clamp(lo, hi)`
+- **Compare:** `.lt(v)`, `.lte(v)`, `.gt(v)`, `.gte(v)`, `.eq(v)`, `.neq(v)`
+- **Write:** `.set(v)`, `.inc()`, `.dec()`, `.reset()`, `.initial()`
 
 ### `text(initial)`
-- **Methods:** `.concat(...args)`, `.includes(search)`
-- **Comparisons:** `.eq(v)`, `.neq(v)`
-- **Actions:** `.set(v)`, `.reset()`, `.default()`
+- **Read:** `.concat(...args)`, `.includes(search)`
+- **Compare:** `.eq(v)`, `.neq(v)`
+- **Write:** `.set(v)`, `.reset()`, `.initial()`
 
 ### `bool(initial)`
-- **Methods:** `.not()`, `.and(...args)`, `.or(...args)`
-- **Comparisons:** `.eq(v)`, `.neq(v)`
-- **Actions:** `.set(v)`, `.toggle()`, `.reset()`, `.default()`
+- **Read:** `.not()`, `.and(...args)`, `.or(...args)`
+- **Compare:** `.eq(v)`, `.neq(v)`
+- **Write:** `.set(v)`, `.toggle()`, `.reset()`, `.initial()`
 
 ### `list(initial)`
 Returns an `Atom<T[]>` with:
-- **Methods:** `.at(index)`, `.length()`, `.includes(item)`
-- **Actions:** `.push(item)`, `.pop()`, `.remove(item)`, `.set(newList)`, `.reset()`, `.default()`
+- **Read:** `.at(index)`, `.length()`, `.includes(item)`
+- **Write:** `.push(item)`, `.pop()`, `.remove(item)`, `.set(newList)`, `.reset()`, `.initial()`
 
 ### `choice(...options)`
 Smart enum-like atoms with dedicated namespaces for autocomplete.
@@ -166,7 +173,7 @@ const isActive = phase.is.loading
 
 ## Core API
 
-Under the hood, everything in `sac` is built on these four primitives. You can use them directly for custom logic or when the fluent API doesn't fit.
+These are the low-level primitives. Use them directly when the fluent helpers do not fit your use case.
 
 ### `state(initial)`
 
@@ -179,13 +186,13 @@ const active  = state(true)
 const items   = state<string[]>([])
 ```
 
-`Atom<T>` is just `{ _type: 'state', initial: T }` — a plain object. No side effects occur at creation.
+`Atom<T>` is just `{ _type: 'state', start: T }` — a plain object. No side effects occur at creation.
 
 ---
 
 ### `calc(fn, deps)`
 
-Creates a node whose value is derived by calling `fn` with the resolved values of `deps`.
+Creates a derived value from other values.
 
 ```ts
 const a = state(3)
@@ -201,9 +208,7 @@ const { get } = run()
 get(hyp) // 5
 ```
 
-`deps` can contain `Atom`s, other `Calc`s, `Iff`s, or plain values. TypeScript infers the argument types of `fn` from the dep tuple automatically.
-
-**Memoisation** — the function is only re-called when at least one dep's resolved value changes (`Object.is` semantics, so `NaN === NaN` correctly).
+`deps` can contain atoms, other calcs, `iff()` nodes, or plain values. `calc()` is memoized, so it only recomputes when one of its resolved deps changes.
 
 ```ts
 let calls = 0
@@ -219,7 +224,7 @@ get(expensive) // calls = 2 — dep changed
 
 ### `set(atom, value)`
 
-Creates an `Update<T>` — pairs an `Atom` with a new value (which can itself be a node).
+Creates an update for an atom. The value can be a plain value or another node.
 
 ```ts
 const score = state(0)
@@ -228,20 +233,20 @@ set(score, 42)            // write a literal
 set(score, add(score, 1)) // write a derived value
 ```
 
-`Update` nodes are just data. They do nothing until passed to `send()`.
+Nothing happens until the update is passed to `send()`.
 
 ---
 
 ### `iff(...conditionGroups)(...outputs)`
 
-A two-stage curried constructor for conditional logic.
+A curried conditional constructor.
 
 ```
 iff( [cond₁, cond₂, ...], [cond₃, ...], ... )
    ( output₀,              output₁,       fallback )
 ```
 
-Each condition group is an `AND` of its conditions. Groups are tested left-to-right. The first fully-truthy group selects its corresponding output. If no group matches, the last output (the fallback) is used.
+Each condition group is an `AND`. Groups are checked left to right. The first matching group wins. If nothing matches, the last output is the fallback.
 
 **Shorthand:** If a group contains only one condition, you can omit the array wrapper.
 
@@ -253,7 +258,7 @@ iff(eq(level, 1))(5, 10)
 iff([eq(level, 1), isReady])(5, 10)
 ```
 
-**As a conditional transition:**
+Use it for transitions:
 
 ```ts
 const phase = state<'idle' | 'running' | 'done'>('idle')
@@ -271,7 +276,7 @@ send(start)   // phase → 'running'
 send(finish)  // phase → 'done'
 ```
 
-**As a computed value selector:**
+Or use it as a value selector:
 
 ```ts
 const level = state(1)
@@ -286,7 +291,7 @@ const { get } = run()
 get(target) // 10
 ```
 
-**Nested iff:** outputs can themselves be `Iff` nodes — `send()` recursively resolves them.
+Outputs can also be nested `Iff` nodes.
 
 ```ts
 const phase = state('start')
@@ -302,17 +307,17 @@ const next = iff([eq(phase, 'start')])(
 
 ### `run()`
 
-Creates a self-contained runtime. Returns `{ get, send, watch }`.
+Creates an isolated runtime. Returns `{ get, send, watch, on }`.
 
 ```ts
-const { get, send, watch } = run()
+const { get, send, watch, on } = run()
 ```
 
-Each call to `run()` produces a **completely independent** state store — the same node definitions can be used in multiple runtimes without interference.
+Each call to `run()` gets its own store, so the same nodes can be reused in multiple runtimes without interference.
 
 #### `get(node)`
 
-Resolves any node (or plain value) to its current value.
+Reads the current value of any node or plain value.
 
 ```ts
 get(score)    // current value of the atom
@@ -323,11 +328,12 @@ get(42)       // plain values pass through
 
 #### `send(action)`
 
-Dispatches one or more `Update` nodes, applying all mutations **atomically**:
+Applies one or more updates **atomically**:
 
 1. All new values are resolved against the **pre-send** store snapshot (order-independent).
 2. All mutations are written.
 3. Watchers whose deps changed are notified.
+4. Runtime `on()` handlers are reconciled against the committed state.
 
 ```ts
 send(set(x, 1))                      // single set
@@ -338,7 +344,7 @@ send([actionA, actionB, conditionalC]) // arrays are flattened recursively
 
 #### `watch(fn, deps)`
 
-Registers a callback fired after `send()` whenever any dep's resolved value changes. Returns an unsubscribe function.
+Runs a callback after `send()` when one of the watched values actually changes. Returns an unsubscribe function.
 
 ```ts
 const unsub = watch(
@@ -351,13 +357,48 @@ unsub()
 send(set(score, 20)) // callback is silent
 ```
 
-`deps` can include `Calc`s and `Iff`s — the watcher fires only when their **resolved output** changes, not merely when an upstream atom changes.
+You can watch atoms, calcs, and `iff()` nodes. The callback only fires when their resolved output changes.
 
 ```ts
 const doubled = mul(score, 2)
 watch((d) => console.log(d), [doubled])
 
 send([set(a, 1), set(b, 6)]) // if product is stable, watcher stays silent
+```
+
+#### `on(condition)(handler)`
+
+Runs a handler when a condition is entered, and optionally runs cleanup when that condition is exited.
+
+- If the condition is already truthy when you register it, the handler runs immediately.
+- While the condition stays truthy, the handler does not rerun.
+- If the handler returns a cleanup function, that cleanup runs once on exit.
+
+```ts
+const timeout = (action, time) => {
+  const id = setTimeout(action, time)
+  return () => clearTimeout(id)
+}
+
+const { get, send, on } = run()
+
+on(light.is.red)(() => timeout(() => send(light.setTo.green), get(time)))
+on(light.is.green)(() => timeout(() => send(light.setTo.red), get(time)))
+```
+
+`on()` runs only after a full `send()` commit, so handlers always see the final post-send state.
+
+The return value is an unsubscribe function. You can also chain `.off()` to run code when the condition is exited after being entered:
+
+```ts
+const unon = on(debugMode)(() => {
+  console.log('debug mode entered')
+  return () => console.log('debug mode exited')
+}).off(() => {
+  console.log('debug mode left')
+})
+
+unon()
 ```
 
 ---
@@ -477,45 +518,44 @@ get(fullName) // 'Ada Lovelace'
 
 ### Derived state
 
-Chain helpers to build complex derived values without any intermediate boilerplate:
+Build UI-ready values without storing duplicated state:
 
 ```ts
-const price    = num(9.99)
-const quantity = num(3)
-const taxRate  = num(0.2)
+const price = num(120)
+const quantity = num(2)
+const discount = num(20)
 
 const subtotal = price.mul(quantity)
-const tax      = subtotal.mul(taxRate)
-const total    = subtotal.add(tax)
+const total = subtotal.sub(discount)
 
 const { get } = run()
-get(total) // 35.964
+get(total) // 220
 ```
 
 ### Conditional transitions
 
-Use `iff` to express state machine transitions declaratively:
+Use `iff()` for common UI flows like loading, success, and error:
 
 ```ts
-const phase   = choice('idle', 'loading', 'success', 'error')
-const hasData = bool(false)
-const error   = text('')
+const status = choice('idle', 'saving', 'saved', 'error')
+const hasName = bool(false)
+const hasError = bool(false)
 
 const next = iff(
-  phase.is.idle,
-  [phase.is.loading, hasData],
-  [phase.is.loading, error.neq('')],
+  status.is.idle,
+  [status.is.saving, hasName],
+  [status.is.saving, hasError],
 )(
-  phase.setTo.loading,
-  phase.setTo.success,
-  phase.setTo.error,
+  status.setTo.saving,
+  status.setTo.saved,
+  status.setTo.error,
 )
 
 const { send, get } = run()
 
-send(next)                 // idle → loading
-send(hasData.set(true))
-send(next)                 // loading → success
+send(next)                 // idle -> saving
+send(hasName.set(true))
+send(next)                 // saving -> saved
 ```
 
 ### Multi-atom atomic updates
@@ -535,27 +575,67 @@ get(y) // 13  (10 + 3, not 15 + 3)
 
 ### Reactive watchers
 
-Watch any mix of atoms, `Calc` nodes, and `Iff` selectors. The callback only fires when the **resolved output** actually changes.
+Use `watch()` when you want to react to value changes, log state, or bridge into UI code.
 
 ```ts
-const score = num(0)
-const level = num(1)
-const rank  = iff(score.gte(100), score.gte(50))('gold', 'silver', 'bronze')
+const search = text('')
+const status = choice('idle', 'loading', 'done')
 
 const { send, watch } = run()
 
 watch(
-  (s, l, r) => console.log(`Score: ${s} | Level: ${l} | Rank: ${r}`),
-  [score, level, rank],
+  (value, nextStatus) => console.log({ value, nextStatus }),
+  [search, status],
 )
 
-send(score.set(60))
-// → Score: 60 | Level: 1 | Rank: silver
+send(search.set('notebook'))
+send(status.setTo.loading)
+```
+
+### Lifecycle effects
+
+Use `on()` for timers, polling, subscriptions, or any effect that should exist only while a condition is true.
+
+```ts
+const modal = bool(false)
+
+const lockScroll = () => {
+  document.body.style.overflow = 'hidden'
+  return () => {
+    document.body.style.overflow = ''
+  }
+}
+
+const { send, on } = run()
+
+const unmodal = on(modal)(lockScroll)
+  .off(() => console.log('modal closed'))
+```
+
+Another common pattern is delayed transitions:
+
+```ts
+const light = choice('red', 'green')
+const delay = num(1000)
+
+const timeout = (action, ms) => {
+  const id = setTimeout(action, ms)
+  return () => clearTimeout(id)
+}
+
+const { get, send, on } = run()
+
+const unred = on(light.is.red)(() => timeout(() => send(light.setTo.green), get(delay)))
+const ungreen = on(light.is.green)(() => timeout(() => send(light.setTo.red), get(delay)))
+
+// later
+unred()
+ungreen()
 ```
 
 ### Composing helpers
 
-Because every helper returns a `Calc`, they nest freely:
+Helpers compose freely:
 
 ```ts
 const a = num(3)
@@ -579,7 +659,7 @@ get(hyp_gt_c)      // false (hyp === c here)
 
 ### Multiple independent runtimes
 
-Multiple calls to `run()` produce completely isolated stores over the same node definitions:
+Multiple runtimes can share the same definitions without sharing state:
 
 ```ts
 const counter = num(0)
@@ -596,13 +676,13 @@ r1.get(counter) // 2
 r2.get(counter) // 1
 ```
 
-This makes it trivial to run isolated test environments, sandboxed UI instances, or server-side per-request stores.
+Useful for tests, previews, or per-request server state.
 
 ---
 
 ## Integrations
 
-`sac` provides official hooks and utilities for popular UI frameworks.
+`sac` includes small helpers for popular UI frameworks.
 
 ### React
 
@@ -679,14 +759,14 @@ set(atom, val)  ─────────────► collectMuts() → ord
 iff([...])(...) ─────────────► resolve() picks the matching output branch
 ```
 
-**`resolve(node)`** is the central evaluation engine. It handles:
+`resolve(node)` is the core evaluator:
 
 - `Atom` → reads from the store (falls back to `initial`)
 - `Calc` → checks memoisation cache; recomputes if any dep changed
 - `Iff` → tests condition groups; returns the matching output
 - Plain values/arrays → returned as-is
 
-**`send(action)`** implements a snapshot-then-write protocol:
+`send(action)` follows a snapshot-then-write flow:
 
 1. Snapshot resolved dep values for all current watchers.
 2. Collect all `Update` nodes from the action (recursing through arrays and `Iff` nodes).
@@ -694,4 +774,4 @@ iff([...])(...) ─────────────► resolve() picks the m
 4. Write all values to the store.
 5. Notify watchers whose dep values changed.
 
-This guarantees atomicity: no mutation within a single `send` can watch the side effects of another mutation in the same `send`.
+That is why one `send()` always sees a consistent pre-send snapshot.
