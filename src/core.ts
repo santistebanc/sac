@@ -25,6 +25,10 @@ type ResolvedDeps<D extends readonly unknown[]> = {
     [K in keyof D]: ResolveOne<D[K]>
 }
 
+function isLabelTarget(value: unknown): value is object {
+    return (typeof value === 'object' && value !== null) || typeof value === 'function'
+}
+
 // ─── Node interfaces ─────────────────────────────────────────────────────────
 
 export interface Atom<T> {
@@ -56,6 +60,13 @@ export type Action = Update<any> | Iff<any> | Action[]
 // ─── Analysis ────────────────────────────────────────────────────────────────
 
 const atomsCache = new WeakMap<object, Set<Atom<any>>>()
+const labelsCache = new WeakMap<object, string>()
+
+export type Labels = Record<string, object>
+
+export function labelOf(value: unknown): string | undefined {
+    return isLabelTarget(value) ? labelsCache.get(value) : undefined
+}
 
 /** Recursively find all Atoms reachable from any node (State, Calc, or Iff). */
 function findAtoms(node: unknown, visited = new Set<unknown>()): Set<Atom<any>> {
@@ -165,6 +176,7 @@ export interface OnRegistration {
 export interface Runtime {
     send(action: Action): void
     get<T>(node: Val<T>): T
+    label(entries: Labels): void
     watch<T>(
         fn: (value: ResolveOne<T>) => void,
         dep: T,
@@ -350,6 +362,12 @@ export function run(initialUpdates: readonly (Update<any> | CommittedUpdate)[] =
         reconcileOns()
     }
 
+    function label(entries: Labels): void {
+        for (const [name, value] of Object.entries(entries)) {
+            if (isLabelTarget(value)) labelsCache.set(value, name)
+        }
+    }
+
     function watch<T>(
         fn: (value: ResolveOne<T>) => void,
         dep: T,
@@ -424,6 +442,7 @@ export function run(initialUpdates: readonly (Update<any> | CommittedUpdate)[] =
     return {
         send,
         get: <T>(node: Val<T>) => resolve(node) as T,
+        label,
         watch,
         onCommit,
         on,

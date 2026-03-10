@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    state, calc, set, family, iff, run,
+    state, calc, set, family, iff, run, labelOf,
     eq, neq, lt, lte, gt, gte,
     add, sub, mul, div, mod, pow, neg, abs,
     sum, min, max,
@@ -1372,6 +1372,21 @@ test('on() handles nested sends triggered during enter reconciliation', () => {
     assert.equal(readyRuns, 1)
 })
 
+test('label() registers names for nodes and actions', () => {
+    const active = bool(true)
+    const score = num(0)
+    const isReady = active.eq(true)
+    const incScore = score.set(100)
+    const runtime = run()
+
+    runtime.label({ active, score, isReady, incScore })
+
+    assert.equal(labelOf(active), 'active')
+    assert.equal(labelOf(score), 'score')
+    assert.equal(labelOf(isReady), 'isReady')
+    assert.equal(labelOf(incScore), 'incScore')
+})
+
 test('trace() logs watched values and returns an unsubscribe function', () => {
     const score = num(0)
     const logs: unknown[][] = []
@@ -1389,6 +1404,23 @@ test('trace() logs watched values and returns an unsubscribe function', () => {
     assert.deepEqual(logs, [['[sac:score]', 2, 3]])
 })
 
+test('trace() uses registered labels by default', () => {
+    const score = num(0)
+    const total = score.add(1)
+    const logs: unknown[][] = []
+    const runtime = run()
+
+    runtime.label({ score, total })
+    const untrace = trace(runtime, [score, total], {
+        logger: (...args) => logs.push(args),
+    })
+
+    runtime.send(score.set(2))
+    untrace()
+
+    assert.deepEqual(logs, [['[sac:score, total]', 2, 3]])
+})
+
 test('traceSend() logs actions before sending them', () => {
     const score = num(0)
     const logs: unknown[][] = []
@@ -1404,4 +1436,21 @@ test('traceSend() logs actions before sending them', () => {
     assert.equal(logs.length, 1)
     assert.equal(logs[0][0], '[sac:actions]')
     assert.deepEqual(logs[0][1], score.set(4))
+})
+
+test('traceSend() uses registered action labels when available', () => {
+    const score = num(0)
+    const incScore = score.set(4)
+    const logs: unknown[][] = []
+    const runtime = run()
+
+    runtime.label({ incScore })
+    const send = traceSend(runtime, {
+        logger: (...args) => logs.push(args),
+    })
+
+    send(incScore)
+
+    assert.equal(runtime.get(score), 4)
+    assert.deepEqual(logs, [['[sac:send]', 'incScore']])
 })

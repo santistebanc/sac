@@ -65,7 +65,7 @@ Most code uses:
 - `num()`, `text()`, `bool()`, `choice()` for state
 - `family()` for keyed state you want to reuse by id
 - `iff()` for transitions and selectors
-- `run()` for `{ get, send, watch, on }`
+- `run()` for `{ get, send, label, watch, on }`
 
 If you want the lower-level primitives, they are:
 - `state(initial)`
@@ -169,6 +169,22 @@ Hydration is silent:
 - no `onCommit()` call
 - no `watch()` callback
 - no automatic startup reconciliation beyond the current state seen by later `get()` or `on(...)`
+
+### `label()`
+
+Use `label()` to register human-readable names for atoms, calcs, and predeclared actions.
+
+```ts
+const active = bool(true)
+const score = num(0)
+const isReady = active.eq(true)
+const incScore = score.set(100)
+
+const runtime = run()
+runtime.label({ active, score, isReady, incScore })
+```
+
+Registered labels are used by helpers like `trace()` and `traceSend()`.
 
 ### `watch()`
 
@@ -339,15 +355,19 @@ watch((room) => {
 import { run, num, trace, traceSend } from 'sac'
 
 const score = num(0)
+const incScore = score.set(5)
 const runtime = run()
-const send = traceSend(runtime, { label: 'actions' })
+
+runtime.label({ score, incScore })
+
+const send = traceSend(runtime)
 
 const untrace = trace(runtime, [score, score.add(1)], {
   label: 'score',
 })
 
-send(score.set(5))
-// [sac:actions] { ...action }
+send(incScore)
+// [sac:send] incScore
 // [sac:score] 5 6
 
 untrace()

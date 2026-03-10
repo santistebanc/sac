@@ -1,4 +1,4 @@
-import type { Action, Runtime } from './core.js'
+import { labelOf, type Action, type Runtime } from './core.js'
 
 export type TraceLogger = (...args: unknown[]) => void
 
@@ -10,7 +10,8 @@ export function trace<D extends readonly unknown[]>(
         logger?: TraceLogger
     },
 ) {
-    const { label = 'trace', logger = console.log } = options ?? {}
+    const derivedLabel = deps.map(dep => labelOf(dep)).filter((name): name is string => !!name).join(', ')
+    const { label = derivedLabel || 'trace', logger = console.log } = options ?? {}
 
     return runtime.watch((...values: any[]) => {
         logger(`[sac:${label}]`, ...values)
@@ -27,7 +28,7 @@ export function traceSend(
     const { label = 'send', logger = console.log } = options ?? {}
 
     return (action: Action) => {
-        logger(`[sac:${label}]`, action)
+        logger(`[sac:${label}]`, labelOf(action) ?? action)
         runtime.send(action)
     }
 }
