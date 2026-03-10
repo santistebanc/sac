@@ -29,6 +29,75 @@ test('set() mutates state', () => {
     assert.equal(get(score), 42)
 })
 
+test('run() hydrates initial state from update descriptors', () => {
+    const score = state(0)
+    const phase = state('idle')
+    const { get } = run([
+        set(score, 42),
+        set(phase, 'saved'),
+    ])
+
+    assert.equal(get(score), 42)
+    assert.equal(get(phase), 'saved')
+})
+
+test('run() hydration uses the last entry for duplicate atoms', () => {
+    const score = state(0)
+    const { get } = run([
+        set(score, 1),
+        set(score, 2),
+    ])
+
+    assert.equal(get(score), 2)
+})
+
+test('run() hydration resolves descriptor values atomically', () => {
+    const score = num(1)
+    const mirror = num(0)
+    const { get } = run([
+        score.set(10),
+        mirror.set(score.add(1)),
+    ])
+
+    assert.equal(get(score), 10)
+    assert.equal(get(mirror), 2)
+})
+
+test('run() hydration falls back to atom start for missing entries', () => {
+    const score = state(0)
+    const phase = state('idle')
+    const { get } = run([
+        set(score, 7),
+    ])
+
+    assert.equal(get(score), 7)
+    assert.equal(get(phase), 'idle')
+})
+
+test('run() hydration does not emit commit/watch events before subscriptions', () => {
+    const active = bool(true)
+    const score = num(0)
+    const logs: string[] = []
+    const runtime = run([
+        active.set(true),
+        score.set(5),
+    ])
+
+    runtime.onCommit(() => {
+        logs.push('commit')
+    })
+
+    runtime.watch(() => {
+        logs.push('watch')
+    }, score)
+
+    runtime.on(active)(() => {
+        logs.push('on')
+    })
+
+    assert.deepEqual(logs, ['on'])
+})
+
 test('calc() derives a value from its deps', () => {
     const level = state(1)
     const doubled = calc((x: number) => x * 2, [level])
@@ -1119,15 +1188,15 @@ test('onCommit() receives committed updates with resolved values', () => {
     const { send, onCommit } = run()
 
     onCommit((updates) => {
-        commits.push(updates.map(({ atom, value }) => ({ atom, value })))
+        commits.push(updates)
     })
 
     send([score.set(score.add(5)), level.set(level.add(1))])
 
     assert.equal(commits.length, 1)
     assert.deepEqual(commits[0], [
-        { atom: score, value: 15 },
-        { atom: level, value: 2 },
+        score.set(15),
+        level.set(2),
     ])
 })
 

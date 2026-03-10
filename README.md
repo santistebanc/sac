@@ -133,6 +133,28 @@ get(y) // 13
 
 ## Runtime API
 
+### `run(initialUpdates?)`
+
+Pass `run()` an optional array of update descriptors to hydrate the runtime before anything subscribes.
+
+```ts
+const user = text('')
+const status = choice('idle', 'ready')
+
+const runtime = run([
+  user.set('Ada'),
+  status.setTo.ready,
+])
+
+runtime.get(user)   // 'Ada'
+runtime.get(status) // 'ready'
+```
+
+Hydration is silent:
+- no `onCommit()` call
+- no `watch()` callback
+- no automatic startup reconciliation beyond the current state seen by later `get()` or `on(...)`
+
 ### `watch()`
 
 Use `watch()` when behavior should rerun when values change.
@@ -161,6 +183,7 @@ Use `onCommit()` when you want the exact committed batch from each `send()`.
 const { send, onCommit } = run()
 
 const uncommit = onCommit((updates) => {
+  // updates are resolved set-shaped entries
   console.log(updates)
 })
 

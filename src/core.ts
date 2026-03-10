@@ -137,12 +137,13 @@ export type ExitHandler = () => void
 export type OnCondition = Val<boolean> | readonly Val<boolean>[]
 export type CommitUnsubscribe = () => void
 
-export interface CommitEntry<T = unknown> {
+export interface CommittedUpdate<T = unknown> {
+    readonly _type: 'set'
     atom: Atom<T>
     value: T
 }
 
-type CommitHandler = (updates: readonly CommitEntry[]) => void
+type CommitHandler = (updates: readonly CommittedUpdate[]) => void
 
 export interface OnRegistration {
     (): void
@@ -173,7 +174,10 @@ type OnEntry = {
     exitHandlers: Set<ExitHandler>
 }
 
-export function run(): Runtime {
+export function run(): Runtime
+export function run(initialUpdates: readonly Update<any>[]): Runtime
+export function run(initialUpdates: readonly CommittedUpdate[]): Runtime
+export function run(initialUpdates: readonly (Update<any> | CommittedUpdate)[] = []): Runtime {
     const store = new Map<Atom<any>, any>()
     const watchers = new Set<WatchEntry>()
     const commitHandlers = new Set<CommitHandler>()
@@ -236,6 +240,16 @@ export function run(): Runtime {
     function resolveOnCondition(condition: OnCondition): boolean {
         if (Array.isArray(condition)) return condition.every(item => !!resolve(item))
         return !!resolve(condition)
+    }
+
+    function applyResolvedMutations(muts: readonly Update<any>[]): CommittedUpdate[] {
+        const values = muts.map(m => deepFreeze(resolve(m.value)))
+        muts.forEach((m, i) => store.set(m.atom, values[i]))
+        return muts.map((m, i) => ({
+            _type: 'set',
+            atom: m.atom,
+            value: values[i],
+        }))
     }
 
     function deactivateOn(entry: OnEntry, notifyExitHandlers: boolean): void {
@@ -308,16 +322,7 @@ export function run(): Runtime {
         // Snapshot candidates before applying mutations
         const planned = [...candidates].map(w => ({ w, snap: w.deps.map(resolve) }))
 
-        // Resolve all values first (atomicity)
-        const values = muts.map(m => deepFreeze(resolve(m.value)))
-
-        // Apply mutations
-        muts.forEach((m, i) => store.set(m.atom, values[i]))
-
-        const committed: CommitEntry[] = muts.map((m, i) => ({
-            atom: m.atom,
-            value: values[i],
-        }))
+        const committed = applyResolvedMutations(muts)
 
         for (const handler of [...commitHandlers]) {
             if (commitHandlers.has(handler)) handler(committed)
@@ -397,6 +402,11 @@ export function run(): Runtime {
 
             return registration
         }
+    }
+
+    const initialMuts = collectMuts(initialUpdates)
+    if (initialMuts.length > 0) {
+        applyResolvedMutations(initialMuts)
     }
 
     return {
