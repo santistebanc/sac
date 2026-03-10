@@ -135,6 +135,14 @@ export type WatchUnsubscribe = () => void
 export type OnHandler = () => void | (() => void)
 export type ExitHandler = () => void
 export type OnCondition = Val<boolean> | readonly Val<boolean>[]
+export type CommitUnsubscribe = () => void
+
+export interface CommitEntry<T = unknown> {
+    atom: Atom<T>
+    value: T
+}
+
+type CommitHandler = (updates: readonly CommitEntry[]) => void
 
 export interface OnRegistration {
     (): void
@@ -152,6 +160,7 @@ export interface Runtime {
         fn: (...args: ResolvedDeps<D>) => void,
         deps: readonly [...D],
     ): WatchUnsubscribe
+    onCommit(handler: CommitHandler): CommitUnsubscribe
     on(condition: OnCondition): (handler: OnHandler) => OnRegistration
 }
 
@@ -167,6 +176,7 @@ type OnEntry = {
 export function run(): Runtime {
     const store = new Map<Atom<any>, any>()
     const watchers = new Set<WatchEntry>()
+    const commitHandlers = new Set<CommitHandler>()
     const watchersByAtom = new Map<Atom<any>, Set<WatchEntry>>()
     const calcCache = new WeakMap<Calc<any>, { depValues: unknown[]; result: any }>()
     const activeStack = new Set<unknown>()
@@ -304,6 +314,15 @@ export function run(): Runtime {
         // Apply mutations
         muts.forEach((m, i) => store.set(m.atom, values[i]))
 
+        const committed: CommitEntry[] = muts.map((m, i) => ({
+            atom: m.atom,
+            value: values[i],
+        }))
+
+        for (const handler of [...commitHandlers]) {
+            if (commitHandlers.has(handler)) handler(committed)
+        }
+
         // Notify if values changed
         for (const { w, snap } of planned) {
             if (!watchers.has(w)) continue
@@ -347,6 +366,13 @@ export function run(): Runtime {
         }
     }
 
+    function onCommit(handler: CommitHandler): CommitUnsubscribe {
+        commitHandlers.add(handler)
+        return () => {
+            commitHandlers.delete(handler)
+        }
+    }
+
     function on(condition: OnCondition) {
         return (handler: OnHandler): OnRegistration => {
             const entry: OnEntry = {
@@ -377,6 +403,7 @@ export function run(): Runtime {
         send,
         get: <T>(node: Val<T>) => resolve(node) as T,
         watch,
+        onCommit,
         on,
     }
 }

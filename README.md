@@ -153,6 +153,21 @@ unwatch()
 - one dep: `watch(fn, query)`
 - many deps: `watch(fn, [query, status])`
 
+### `onCommit()`
+
+Use `onCommit()` when you want the exact committed batch from each `send()`.
+
+```ts
+const { send, onCommit } = run()
+
+const uncommit = onCommit((updates) => {
+  console.log(updates)
+})
+
+send(status.setTo.saving)
+uncommit()
+```
+
 ### `on()`
 
 Use `on()` for enter/exit effects that should stay active while a condition is true.

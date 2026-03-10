@@ -1112,6 +1112,73 @@ test('watch() accepts a single calc dep without an array', () => {
     assert.deepEqual(seen, [6])
 })
 
+test('onCommit() receives committed updates with resolved values', () => {
+    const score = num(10)
+    const level = num(1)
+    const commits: unknown[] = []
+    const { send, onCommit } = run()
+
+    onCommit((updates) => {
+        commits.push(updates.map(({ atom, value }) => ({ atom, value })))
+    })
+
+    send([score.set(score.add(5)), level.set(level.add(1))])
+
+    assert.equal(commits.length, 1)
+    assert.deepEqual(commits[0], [
+        { atom: score, value: 15 },
+        { atom: level, value: 2 },
+    ])
+})
+
+test('onCommit() returns an unsubscribe function', () => {
+    const score = num(0)
+    const { send, onCommit } = run()
+    let calls = 0
+
+    const uncommit = onCommit(() => {
+        calls++
+    })
+
+    send(score.set(1))
+    uncommit()
+    send(score.set(2))
+
+    assert.equal(calls, 1)
+})
+
+test('onCommit() does not fire for no-op sends', () => {
+    const score = num(0)
+    const { send, onCommit } = run()
+    let calls = 0
+
+    onCommit(() => {
+        calls++
+    })
+
+    send(iff(score.gt(10))(score.set(1)))
+
+    assert.equal(calls, 0)
+})
+
+test('onCommit() fires before watch() callbacks for the same send', () => {
+    const score = num(0)
+    const order: string[] = []
+    const { send, onCommit, watch } = run()
+
+    onCommit(() => {
+        order.push('commit')
+    })
+
+    watch(() => {
+        order.push('watch')
+    }, score)
+
+    send(score.set(1))
+
+    assert.deepEqual(order, ['commit', 'watch'])
+})
+
 test('on() returns an unsubscribe function', () => {
     const active = bool(true)
     const { send, on } = run()
