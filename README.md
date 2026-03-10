@@ -65,7 +65,7 @@ Most code uses:
 - `num()`, `text()`, `bool()`, `choice()` for state
 - `family()` for keyed state you want to reuse by id
 - `iff()` for transitions and selectors
-- `run()` for `{ get, send, label, watch, on }`
+- `run()` for `{ get, send, label, snapshot, inspect, dispose, watch, on }`
 
 If you want the lower-level primitives, they are:
 - `state(initial)`
@@ -186,6 +186,43 @@ runtime.label({ active, score, isReady, incScore })
 
 Registered labels are used by helpers like `trace()` and `traceSend()`.
 
+### `snapshot()`
+
+Use `snapshot()` to export the current runtime store as resolved update descriptors.
+
+```ts
+const score = num(0)
+const level = num(1)
+
+const runtime = run([
+  score.set(5),
+  level.set(2),
+])
+
+runtime.send(score.set(score.add(3)))
+
+const saved = runtime.snapshot()
+const restored = run(saved)
+
+restored.get(score) // 8
+restored.get(level) // 2
+```
+
+### `inspect()`
+
+Use `inspect()` for a small label-aware debug view of the current runtime state.
+
+```ts
+const score = num(0)
+const total = score.add(1)
+const save = score.set(5)
+const runtime = run()
+
+runtime.label({ score, total, save })
+
+runtime.inspect({ score, total, save })
+```
+
 ### `watch()`
 
 Use `watch()` when behavior should rerun when values change.
@@ -205,6 +242,16 @@ unwatch()
 `watch()` accepts either:
 - one dep: `watch(fn, query)`
 - many deps: `watch(fn, [query, status])`
+
+### `dispose()`
+
+Use `dispose()` to tear down runtime subscriptions and active `on()` effects in tests or temporary runtimes.
+
+```ts
+const runtime = run()
+
+runtime.dispose()
+```
 
 ### `onCommit()`
 
@@ -369,6 +416,8 @@ const untrace = trace(runtime, [score, score.add(1)], {
 send(incScore)
 // [sac:send] incScore
 // [sac:score] 5 6
+
+runtime.inspect({ score, incScore })
 
 untrace()
 ```

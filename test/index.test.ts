@@ -129,6 +129,50 @@ test('run() hydration does not emit commit/watch events before subscriptions', (
     assert.deepEqual(logs, ['on'])
 })
 
+test('snapshot() round-trips current runtime state through run()', () => {
+    const score = num(0)
+    const level = num(1)
+    const first = run([
+        score.set(5),
+        level.set(2),
+    ])
+
+    first.send([score.set(score.add(3)), level.set(level.mul(2))])
+    const second = run(first.snapshot())
+
+    assert.equal(second.get(score), 8)
+    assert.equal(second.get(level), 4)
+})
+
+test('snapshot() exports resolved set-shaped committed state', () => {
+    const score = num(0)
+    const level = num(1)
+    const runtime = run([
+        score.set(2),
+    ])
+
+    runtime.send(level.set(level.add(2)))
+
+    assert.deepEqual(runtime.snapshot(), [
+        score.set(2),
+        level.set(3),
+    ])
+})
+
+test('snapshot(entries) includes current atoms reachable from entries', () => {
+    const active = bool(true)
+    const score = num(0)
+    const total = score.add(1)
+    const runtime = run([
+        score.set(5),
+    ])
+
+    assert.deepEqual(runtime.snapshot({ active, total }), [
+        active.set(true),
+        score.set(5),
+    ])
+})
+
 test('calc() derives a value from its deps', () => {
     const level = state(1)
     const doubled = calc((x: number) => x * 2, [level])
@@ -1387,6 +1431,48 @@ test('label() registers names for nodes and actions', () => {
     assert.equal(labelOf(incScore), 'incScore')
 })
 
+test('inspect() returns label-aware entries and a snapshot', () => {
+    const active = bool(true)
+    const score = num(0)
+    const isReady = active.eq(true)
+    const incScore = score.set(score.add(1))
+    const runtime = run([
+        score.set(5),
+    ])
+
+    runtime.label({ active, score, isReady, incScore })
+
+    assert.deepEqual(runtime.inspect({ active, score, isReady, incScore }), {
+        entries: [
+            { label: 'active', type: 'state', value: true },
+            { label: 'score', type: 'state', value: 5 },
+            { label: 'isReady', type: 'calc', value: true },
+            { label: 'incScore', type: 'set', atom: 'score', value: 6 },
+        ],
+        snapshot: [
+            active.set(true),
+            score.set(5),
+        ],
+    })
+})
+
+test('inspect() without entries reflects the current snapshot', () => {
+    const score = num(0)
+    const runtime = run()
+
+    runtime.label({ score })
+    runtime.send(score.set(2))
+
+    assert.deepEqual(runtime.inspect(), {
+        entries: [
+            { label: 'score', type: 'state', value: 2 },
+        ],
+        snapshot: [
+            score.set(2),
+        ],
+    })
+})
+
 test('trace() logs watched values and returns an unsubscribe function', () => {
     const score = num(0)
     const logs: unknown[][] = []
@@ -1435,7 +1521,7 @@ test('traceSend() logs actions before sending them', () => {
     assert.equal(runtime.get(score), 4)
     assert.equal(logs.length, 1)
     assert.equal(logs[0][0], '[sac:actions]')
-    assert.deepEqual(logs[0][1], score.set(4))
+    assert.deepEqual(logs[0][1], { type: 'set', atom: score, value: 4 })
 })
 
 test('traceSend() uses registered action labels when available', () => {
@@ -1453,4 +1539,41 @@ test('traceSend() uses registered action labels when available', () => {
 
     assert.equal(runtime.get(score), 4)
     assert.deepEqual(logs, [['[sac:send]', 'incScore']])
+})
+
+test('dispose() unsubscribes watch() and onCommit() listeners', () => {
+    const score = num(0)
+    const events: string[] = []
+    const runtime = run()
+
+    runtime.watch(() => {
+        events.push('watch')
+    }, score)
+    runtime.onCommit(() => {
+        events.push('commit')
+    })
+
+    runtime.dispose()
+    runtime.send(score.set(1))
+
+    assert.deepEqual(events, [])
+})
+
+test('dispose() cleans active on() handlers without firing exit handlers', () => {
+    const active = bool(true)
+    const runtime = run()
+    let cleans = 0
+    let exits = 0
+
+    runtime.on(active)(() => () => {
+        cleans++
+    }).exit(() => {
+        exits++
+    })
+
+    runtime.dispose()
+    runtime.dispose()
+
+    assert.equal(cleans, 1)
+    assert.equal(exits, 0)
 })

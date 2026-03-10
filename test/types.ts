@@ -1,6 +1,6 @@
 import {
     run, bool, num, family, trace, traceSend, labelOf,
-    type Runtime, type OnRegistration, type WatchUnsubscribe, type CommittedUpdate,
+    type Runtime, type OnRegistration, type WatchUnsubscribe, type CommittedUpdate, type Inspection,
 } from '../src/index.js'
 
 const runtime: Runtime = run()
@@ -24,15 +24,22 @@ const tracedWatch: WatchUnsubscribe = trace(runtime, [count])
 const tracedSend = traceSend(runtime)
 const keyedCount = family((id: string) => num(id.length))
 const resetCount = count.reset()
+const snapshot: readonly CommittedUpdate[] = runtime.snapshot()
+const namedSnapshot: readonly CommittedUpdate[] = runtime.snapshot({ count })
+const inspection: Inspection = runtime.inspect({ count, resetCount })
 runtime.onCommit((updates) => {
     committedUpdates.push(...updates)
 })
 runtime.label({ active, count, resetCount })
+runtime.dispose()
 
 tracedSend(count.inc())
 hydratedRuntime.get(count)
 keyedCount('abc').set(5)
 labelOf(resetCount)
+snapshot.length
+namedSnapshot.length
+inspection.entries.length
 registration()
 unwatchOne()
 unwatchMany()

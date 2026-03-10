@@ -28,7 +28,14 @@ export function traceSend(
     const { label = 'send', logger = console.log } = options ?? {}
 
     return (action: Action) => {
-        logger(`[sac:${label}]`, labelOf(action) ?? action)
+        const inspected = runtime.inspect({ action }).entries[0]
+        const payload =
+            labelOf(action)
+            ?? (inspected?.type === 'set'
+                ? { type: inspected.type, atom: inspected.atom, value: inspected.value }
+                : action)
+
+        logger(`[sac:${label}]`, payload)
         runtime.send(action)
     }
 }

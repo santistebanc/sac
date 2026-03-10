@@ -166,6 +166,18 @@ export interface CommittedUpdate<T = unknown> {
     value: T
 }
 
+export interface InspectedEntry {
+    label?: string
+    type: 'state' | 'calc' | 'iff' | 'set' | 'value'
+    atom?: string | Atom<unknown>
+    value: unknown
+}
+
+export interface Inspection {
+    entries: readonly InspectedEntry[]
+    snapshot: readonly CommittedUpdate[]
+}
+
 type CommitHandler = (updates: readonly CommittedUpdate[]) => void
 
 export interface OnRegistration {
@@ -177,6 +189,9 @@ export interface Runtime {
     send(action: Action): void
     get<T>(node: Val<T>): T
     label(entries: Labels): void
+    snapshot(entries?: Labels): readonly CommittedUpdate[]
+    inspect(entries?: Labels): Inspection
+    dispose(): void
     watch<T>(
         fn: (value: ResolveOne<T>) => void,
         dep: T,
@@ -212,7 +227,7 @@ export function run(initialUpdates: readonly (Update<any> | CommittedUpdate)[] =
     let reconcilingOns = false
     let pendingOnReconcile = false
 
-    function resolve(node: unknown): unknown {
+    function resolve(node: unknown, peek = false): unknown {
         if (node == null || typeof node !== 'object' || !('_type' in node)) return node
 
         if (activeStack.has(node)) {
@@ -224,26 +239,29 @@ export function run(initialUpdates: readonly (Update<any> | CommittedUpdate)[] =
             const n = node as any
             switch (n._type) {
                 case 'state': {
-                    if (!store.has(n)) store.set(n, n.start)
+                    if (!store.has(n)) {
+                        if (peek) return n.start
+                        store.set(n, n.start)
+                    }
                     return store.get(n)
                 }
                 case 'calc': {
-                    const args = n.deps.map(resolve)
+                    const args = n.deps.map((dep: unknown) => resolve(dep, peek))
                     const cached = calcCache.get(n)
                     if (cached && cached.depValues.every((v, i) => Object.is(v, args[i]))) {
                         return cached.result
                     }
                     const result = deepFreeze(n.fn(...args))
-                    calcCache.set(n, { depValues: args, result })
+                    if (!peek) calcCache.set(n, { depValues: args, result })
                     return result
                 }
                 case 'iff': {
                     for (let i = 0; i < n.conditionGroups.length; i++) {
                         const group = n.conditionGroups[i]
                         const conditions = Array.isArray(group) ? group : [group]
-                        if (conditions.every(c => !!resolve(c))) return resolve(n.outputs[i])
+                        if (conditions.every(c => !!resolve(c, peek))) return resolve(n.outputs[i], peek)
                     }
-                    return resolve(n.outputs[n.conditionGroups.length])
+                    return resolve(n.outputs[n.conditionGroups.length], peek)
                 }
                 default:
                     return node
@@ -264,6 +282,39 @@ export function run(initialUpdates: readonly (Update<any> | CommittedUpdate)[] =
     function resolveOnCondition(condition: OnCondition): boolean {
         if (Array.isArray(condition)) return condition.every(item => !!resolve(item))
         return !!resolve(condition)
+    }
+
+    function collectSnapshotAtoms(entries?: Labels): Atom<any>[] {
+        if (!entries) return [...store.keys()]
+
+        const atoms: Atom<any>[] = []
+        const seen = new Set<Atom<any>>()
+
+        const addAtom = (atom: Atom<any>) => {
+            if (seen.has(atom)) return
+            seen.add(atom)
+            atoms.push(atom)
+        }
+
+        for (const value of Object.values(entries)) {
+            if (!value || typeof value !== 'object') continue
+
+            const node = value as any
+            if (node._type === 'state') {
+                addAtom(node)
+                continue
+            }
+
+            if (node._type === 'set') {
+                addAtom(node.atom)
+                for (const atom of findAtoms(node.value)) addAtom(atom)
+                continue
+            }
+
+            for (const atom of findAtoms(node)) addAtom(atom)
+        }
+
+        return atoms
     }
 
     function applyResolvedMutations(muts: readonly Update<any>[]): CommittedUpdate[] {
@@ -344,7 +395,7 @@ export function run(initialUpdates: readonly (Update<any> | CommittedUpdate)[] =
         }
 
         // Snapshot candidates before applying mutations
-        const planned = [...candidates].map(w => ({ w, snap: w.deps.map(resolve) }))
+        const planned = [...candidates].map(w => ({ w, snap: w.deps.map((dep) => resolve(dep)) }))
 
         const committed = applyResolvedMutations(muts)
 
@@ -355,7 +406,7 @@ export function run(initialUpdates: readonly (Update<any> | CommittedUpdate)[] =
         // Notify if values changed
         for (const { w, snap } of planned) {
             if (!watchers.has(w)) continue
-            const next = w.deps.map(resolve)
+            const next = w.deps.map((dep) => resolve(dep))
             if (next.some((v, j) => !Object.is(v, snap[j]))) w.fn(...next)
         }
 
@@ -366,6 +417,96 @@ export function run(initialUpdates: readonly (Update<any> | CommittedUpdate)[] =
         for (const [name, value] of Object.entries(entries)) {
             if (isLabelTarget(value)) labelsCache.set(value, name)
         }
+    }
+
+    function snapshot(entries?: Labels): readonly CommittedUpdate[] {
+        return collectSnapshotAtoms(entries).map((atom) => ({
+            _type: 'set',
+            atom,
+            value: store.has(atom) ? store.get(atom) : atom.start,
+        }))
+    }
+
+    function inspect(entries?: Labels): Inspection {
+        const snapshotEntries = snapshot(entries)
+
+        if (!entries) {
+            return {
+                entries: snapshotEntries.map(({ atom, value }) => ({
+                    label: labelOf(atom),
+                    type: 'state',
+                    value,
+                })),
+                snapshot: snapshotEntries,
+            }
+        }
+
+        const inspectedEntries: InspectedEntry[] = []
+
+        for (const [name, value] of Object.entries(entries)) {
+            if (!value || typeof value !== 'object' || !('_type' in value)) {
+                inspectedEntries.push({
+                    label: name,
+                    type: 'value',
+                    value,
+                })
+                continue
+            }
+
+            const node = value as any
+            switch (node._type) {
+                case 'state':
+                    inspectedEntries.push({
+                        label: name,
+                        type: 'state',
+                        value: store.has(node) ? store.get(node) : node.start,
+                    })
+                    break
+                case 'calc':
+                    inspectedEntries.push({
+                        label: name,
+                        type: 'calc',
+                        value: resolve(node, true),
+                    })
+                    break
+                case 'iff':
+                    inspectedEntries.push({
+                        label: name,
+                        type: 'iff',
+                        value: resolve(node, true),
+                    })
+                    break
+                case 'set':
+                    inspectedEntries.push({
+                        label: name,
+                        type: 'set',
+                        atom: labelOf(node.atom) ?? node.atom,
+                        value: resolve(node.value, true),
+                    })
+                    break
+                default:
+                    inspectedEntries.push({
+                        label: name,
+                        type: 'value',
+                        value,
+                    })
+                    break
+            }
+        }
+
+        return {
+            entries: inspectedEntries,
+            snapshot: snapshotEntries,
+        }
+    }
+
+    function dispose(): void {
+        for (const entry of [...onEntries]) {
+            disposeOn(entry)
+        }
+        watchers.clear()
+        watchersByAtom.clear()
+        commitHandlers.clear()
     }
 
     function watch<T>(
@@ -443,6 +584,9 @@ export function run(initialUpdates: readonly (Update<any> | CommittedUpdate)[] =
         send,
         get: <T>(node: Val<T>) => resolve(node) as T,
         label,
+        snapshot,
+        inspect,
+        dispose,
         watch,
         onCommit,
         on,
