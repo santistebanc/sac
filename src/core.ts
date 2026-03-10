@@ -113,6 +113,18 @@ export function set<T>(atom: Atom<T>, value: Val<T>): Update<T> {
     return { _type: 'set', atom, value }
 }
 
+export function family<K, T>(create: (key: K) => T): (key: K) => T {
+    const cache = new Map<K, T>()
+    return (key: K) => {
+        let value = cache.get(key)
+        if (value === undefined && !cache.has(key)) {
+            value = create(key)
+            cache.set(key, value)
+        }
+        return value as T
+    }
+}
+
 export function iff(
     ...conditionGroups: readonly (unknown | readonly unknown[])[]
 ): <T extends readonly unknown[]>(...outputs: T) => Iff<T[number]> {

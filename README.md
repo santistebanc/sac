@@ -63,6 +63,7 @@ npm install github:santistebanc/sac
 
 Most code uses:
 - `num()`, `text()`, `bool()`, `choice()` for state
+- `family()` for keyed state you want to reuse by id
 - `iff()` for transitions and selectors
 - `run()` for `{ get, send, watch, on }`
 
@@ -129,6 +130,20 @@ send([x.set(x.add(5)), y.set(x.add(3))])
 
 get(x) // 15
 get(y) // 13
+```
+
+### Keyed state
+
+```ts
+import { family, bool, run } from 'sac'
+
+const expanded = family((id: string) => bool(false))
+const { get, send } = run()
+
+send(expanded('todo-1').set(true))
+
+get(expanded('todo-1')) // true
+get(expanded('todo-2')) // false
 ```
 
 ## Runtime API

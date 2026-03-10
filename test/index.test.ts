@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    state, calc, set, iff, run,
+    state, calc, set, family, iff, run,
     eq, neq, lt, lte, gt, gte,
     add, sub, mul, div, mod, pow, neg, abs,
     sum, min, max,
@@ -27,6 +27,37 @@ test('set() mutates state', () => {
     const { get, send } = run()
     send(set(score, 42))
     assert.equal(get(score), 42)
+})
+
+test('family() returns the same instance for the same key', () => {
+    const expanded = family((id: string) => bool(id === 'open'))
+
+    assert.equal(expanded('a'), expanded('a'))
+    assert.notEqual(expanded('a'), expanded('b'))
+})
+
+test('family() creates values lazily once per unique key', () => {
+    const seen: string[] = []
+    const drafts = family((id: string) => {
+        seen.push(id)
+        return text(id)
+    })
+
+    drafts('a')
+    drafts('a')
+    drafts('b')
+
+    assert.deepEqual(seen, ['a', 'b'])
+})
+
+test('family() works with runtime state lookups by key', () => {
+    const draft = family((id: string) => text(`draft:${id}`))
+    const { get, send } = run()
+
+    send(draft('a').set('Ada'))
+
+    assert.equal(get(draft('a')), 'Ada')
+    assert.equal(get(draft('b')), 'draft:b')
 })
 
 test('run() hydrates initial state from update descriptors', () => {

@@ -1,5 +1,5 @@
 import {
-    run, bool, num, trace, traceSend,
+    run, bool, num, family, trace, traceSend,
     type Runtime, type OnRegistration, type WatchUnsubscribe, type CommittedUpdate,
 } from '../src/index.js'
 
@@ -22,12 +22,14 @@ const registration: OnRegistration = runtime.on([active, active.not()])(() => un
 
 const tracedWatch: WatchUnsubscribe = trace(runtime, [count])
 const tracedSend = traceSend(runtime)
+const keyedCount = family((id: string) => num(id.length))
 runtime.onCommit((updates) => {
     committedUpdates.push(...updates)
 })
 
 tracedSend(count.inc())
 hydratedRuntime.get(count)
+keyedCount('abc').set(5)
 registration()
 unwatchOne()
 unwatchMany()
